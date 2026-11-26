@@ -90,7 +90,8 @@ def find_stock(q):
     norm = lambda x: x.replace(" ", "").upper()  # noqa: E731
     for src in (UNIVERSE, krx_all()):
         for u in src:
-            if q in (u["code"], u["name"]) or norm(q) == norm(u["name"]):
+            names = [u["name"]] + ([u["alias"]] if u.get("alias") else [])
+            if q == u["code"] or any(q == n or norm(q) == norm(n) for n in names):
                 return {"code": u["code"], "name": u["name"], "yahoo": u["yahoo"]}
     if re.fullmatch(r"[0-9A-Z]{6}", q):
         for suf in (".KS", ".KQ"):
@@ -107,7 +108,8 @@ def stock_candidates(q, limit=15):
     seen, out = set(), []
     for src in (UNIVERSE, krx_all()):
         for u in src:
-            if key in u["name"].replace(" ", "").upper() and u["code"] not in seen:
+            names = [u["name"]] + ([u["alias"]] if u.get("alias") else [])
+            if any(key in n.replace(" ", "").upper() for n in names) and u["code"] not in seen:
                 seen.add(u["code"])
                 out.append({"code": u["code"], "name": u["name"], "yahoo": u["yahoo"]})
     out.sort(key=lambda x: (not x["name"].upper().startswith(key), len(x["name"])))
@@ -343,6 +345,15 @@ def poll_commands(st, notify, timeout=0):
         cid = str(m.get("chat", {}).get("id", ""))
         text = normalize(m.get("text") or "")
         ctype = m.get("chat", {}).get("type")
+        pcmd = from_prompt(m) if text else None
+        if pcmd:                                   # 입력창에 쓴 답 -> 명령으로
+            text = f"{pcmd} {text}"
+        elif text in PROMPTS and cid:              # 인자 없이 누른 메뉴 -> 입력창 열기
+            try:
+                ask_input(token, cid, text)
+            except Exception:  # noqa: BLE001
+                pass
+            continue
         if cid and cid != owner and ctype in ("group", "supergroup"):
             # 아직 연결 안 된 그룹: 주인에게 그룹 ID를 한 번 알려준다
             told = st.setdefault("groups_told", [])
@@ -404,6 +415,37 @@ BOT_COMMANDS = [
     ("watchlist", "관심 종목 목록"),
     ("help", "명령 안내"),
 ]
+
+
+PROMPTS = {
+    "검색": "검색할 종목이나 코인을 입력하세요",
+    "보유": "보유 종목과 매수가를 입력하세요 (예: 한미사이언스 55200)",
+    "삭제": "보유에서 뺄 종목을 입력하세요",
+    "관심": "관심 종목으로 등록할 종목을 입력하세요",
+    "관심삭제": "관심 종목에서 뺄 종목을 입력하세요",
+}
+
+
+def ask_input(token, chat_id, cmd):
+    """입력창을 바로 열어주는 질문 메시지 (ForceReply)."""
+    data = json.dumps({"chat_id": chat_id, "text": PROMPTS[cmd],
+                       "reply_markup": {"force_reply": True, "selective": True,
+                                        "input_field_placeholder": "예: 현대차" if cmd != "보유" else "예: 한미사이언스 55200"}}).encode()
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15):
+        pass
+
+
+def from_prompt(m):
+    """봇의 입력 요청 메시지에 대한 답장이면 해당 명령 이름을 돌려준다."""
+    rt = m.get("reply_to_message") or {}
+    if not rt.get("from", {}).get("is_bot"):
+        return None
+    for cmd, q in PROMPTS.items():
+        if rt.get("text", "").startswith(q):
+            return cmd
+    return None
 
 
 def normalize(text):

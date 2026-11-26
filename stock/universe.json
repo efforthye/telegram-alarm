@@ -27,7 +27,8 @@
 "code": "005380",
 "name": "현대자동차",
 "yahoo": "005380.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "현대차"
 },
 {
 "code": "373220",
@@ -129,7 +130,8 @@
 "code": "010120",
 "name": "엘에스일렉트릭",
 "yahoo": "010120.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "LS ELECTRIC"
 },
 {
 "code": "066570",
@@ -177,7 +179,8 @@
 "code": "000810",
 "name": "삼성화재해상보험",
 "yahoo": "000810.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "삼성화재"
 },
 {
 "code": "011070",
@@ -213,7 +216,8 @@
 "code": "015760",
 "name": "한국전력공사",
 "yahoo": "015760.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "한국전력"
 },
 {
 "code": "010140",
@@ -273,7 +277,8 @@
 "code": "033780",
 "name": "케이티앤지",
 "yahoo": "033780.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "KT&G"
 },
 {
 "code": "138040",
@@ -345,7 +350,8 @@
 "code": "030200",
 "name": "케이티",
 "yahoo": "030200.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "KT"
 },
 {
 "code": "071050",
@@ -537,7 +543,8 @@
 "code": "326030",
 "name": "에스케이바이오팜",
 "yahoo": "326030.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "SK바이오팜"
 },
 {
 "code": "032640",
@@ -669,7 +676,8 @@
 "code": "002380",
 "name": "케이씨씨",
 "yahoo": "002380.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "KCC"
 },
 {
 "code": "004020",
@@ -1071,7 +1079,8 @@
 "code": "003090",
 "name": "대웅",
 "yahoo": "003090.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "대웅제약"
 },
 {
 "code": "003240",
@@ -1089,7 +1098,8 @@
 "code": "005300",
 "name": "롯데칠성음료",
 "yahoo": "005300.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "롯데칠성"
 },
 {
 "code": "280360",
@@ -1149,7 +1159,8 @@
 "code": "069260",
 "name": "티케이지휴켐스",
 "yahoo": "069260.KS",
-"index": "KOSPI200"
+"index": "KOSPI200",
+"alias": "TKG휴켐스"
 },
 {
 "code": "001680",
@@ -1275,7 +1286,8 @@
 "code": "030520",
 "name": "한컴",
 "yahoo": "030520.KQ",
-"index": "KOSDAQ150"
+"index": "KOSDAQ150",
+"alias": "한글과컴퓨터"
 },
 {
 "code": "030530",
@@ -1425,7 +1437,8 @@
 "code": "056190",
 "name": "SFA",
 "yahoo": "056190.KQ",
-"index": "KOSDAQ150"
+"index": "KOSDAQ150",
+"alias": "에스에프에이"
 },
 {
 "code": "058470",
@@ -1443,7 +1456,8 @@
 "code": "060250",
 "name": "NHN KCP",
 "yahoo": "060250.KQ",
-"index": "KOSDAQ150"
+"index": "KOSDAQ150",
+"alias": "NHN한국사이버결제"
 },
 {
 "code": "060280",
@@ -1647,7 +1661,8 @@
 "code": "124500",
 "name": "아이티센글로벌",
 "yahoo": "124500.KQ",
-"index": "KOSDAQ150"
+"index": "KOSDAQ150",
+"alias": "아이티센"
 },
 {
 "code": "131290",
@@ -1743,7 +1758,8 @@
 "code": "222080",
 "name": "SFA넥셀",
 "yahoo": "222080.KQ",
-"index": "KOSDAQ150"
+"index": "KOSDAQ150",
+"alias": "씨아이에스"
 },
 {
 "code": "222800",
