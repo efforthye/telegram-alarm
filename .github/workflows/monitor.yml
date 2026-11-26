@@ -10,10 +10,11 @@ on:
     - cron: "30 23 * * 0-4"      # 평일 08:30 KST: 아침 브리핑 (UTC 일~목 23:30)
     - cron: "30 7 * * 1-5"       # 평일 16:30 KST: 마감 브리핑
     - cron: "0 0 * * 0,6"        # 주말 09:00 KST: 주말 코인 브리핑
+    - cron: "*/5 * * * *"        # 5분마다: 텔레그램 명령(검색, 보유, 관심)만 처리
   workflow_dispatch:
     inputs:
       mode:
-        description: "monitor | report-morning | report-stock | report-coin | test"
+        description: "monitor | commands | report-morning | report-stock | report-coin | test"
         default: monitor
 
 concurrency:
@@ -38,17 +39,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 상태 브랜치 가져오기
+      - name: 상태 가져오기 (암호화된 state 브랜치)
         run: |
+          PASS=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -d' ' -f1)
           if git ls-remote --exit-code --heads origin state >/dev/null; then
-            git fetch --depth 1 origin state
-            git worktree add _state origin/state
-          else
-            mkdir _state
+            git fetch -q --depth 1 origin state
+            mkdir -p _old && git --work-tree=_old checkout -q origin/state -- . && git reset -q
+            if [ -f _old/state.enc ]; then
+              openssl enc -d -aes-256-cbc -pbkdf2 -pass "pass:$PASS" -in _old/state.enc | tar xz -C monitor || echo "복호화 실패: 새 상태로 시작"
+            else
+              for f in holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log; do
+                [ -f "_old/$f" ] && cp "_old/$f" monitor/ || true
+              done
+            fi
           fi
-          for f in holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log; do
-            [ -f "_state/$f" ] && cp "_state/$f" monitor/ || true
-          done
           [ -f monitor/holdings.json ] || cp monitor/holdings.seed.json monitor/holdings.json
 
       - name: 경로 연결 (로컬과 같은 폴더 구조)
@@ -65,6 +69,7 @@ jobs:
             "30 23 * * 0-4") MODE=report-morning ;;
             "30 7 * * 1-5")  MODE=report-stock ;;
             "0 0 * * 0,6")   MODE=report-coin ;;
+            "*/5 * * * *")   MODE=commands ;;
           esac
           MODE="${MODE:-monitor}"
           echo "mode=$MODE"
@@ -72,6 +77,7 @@ jobs:
             report-stock) python3 -I monitor/monitor.py --report stock ;;
             report-coin)  python3 -I monitor/monitor.py --report coin ;;
             report-morning) python3 -I monitor/monitor.py --report morning ;;
+            commands)     python3 -I monitor/monitor.py --commands ;;
             test)
               python3 -I -c '
           import os, re
@@ -84,25 +90,21 @@ jobs:
               sh coin/notify.sh "연결 테스트" "깃허브 액션에서 보낸 테스트 알림이에요." ;;
             *)            python3 -I monitor/monitor.py ;;
           esac
-          tail -5 monitor/monitor.log || true
+          [ "$MODE" = commands ] || tail -5 monitor/monitor.log || true
 
-      - name: 상태 저장 (state 브랜치)
+      - name: 상태 저장 (암호화, 기록 없이 1개 커밋만 유지)
         if: always()
         run: |
-          cd _state
-          [ -d .git ] || [ -f .git ] || { git init -q; git checkout -q --orphan state; }
-          for f in holdings.json state.json cmd_state.json krx_all.json last_picks.json; do
-            [ -f "../monitor/$f" ] && cp "../monitor/$f" . || true
-          done
-          [ -f ../monitor/monitor.log ] && tail -n 1000 ../monitor/monitor.log > monitor.log || true
+          PASS=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -d' ' -f1)
+          [ -f monitor/monitor.log ] && tail -n 1000 monitor/monitor.log > monitor/monitor.log.tmp && mv monitor/monitor.log.tmp monitor/monitor.log
+          FILES=$(cd monitor && ls holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log 2>/dev/null)
+          mkdir -p _new
+          tar cz -C monitor $FILES | openssl enc -aes-256-cbc -pbkdf2 -salt -pass "pass:$PASS" -out _new/state.enc
+          cd _new
+          git init -q
+          git checkout -q -b state
           git config user.name "alarm-bot"
           git config user.email "alarm-bot@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && exit 0
-          git commit -q -m "state $(date '+%Y-%m-%d %H:%M')"
-          if git remote | grep -q origin; then
-            git push -q origin HEAD:state
-          else
-            git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-            git push -q origin HEAD:state
-          fi
+          git add state.enc
+          git commit -q -m "state (encrypted)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" state

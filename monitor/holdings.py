@@ -34,7 +34,7 @@ HELP = ("<b>종목 검색</b>\n"
         "보유 한미사이언스 55200\n"
         "보유 SOL 85.2\n"
         "삭제 한미사이언스\n"
-        "목록\n"
+        "목록  (보유 종목별 지금 판정)\n"
         "\n"
         "<b>관심 종목</b> (매수 신호 감시)\n"
         "관심 제닉스로보틱스\n"
@@ -275,10 +275,26 @@ def handle(text, notify):
         ok = before != len(h["stocks"]) + len(h["coins"])
         notify("보유 삭제" if ok else "보유 삭제 실패", f"{q} {'삭제했어요' if ok else '보유 목록에 없어요'}")
         return
-    if t in ("목록", "보유목록", "리스트"):
-        lines = [f"{x['name']} 매수가 {x['buy_price']:,.0f}" for x in h["stocks"]]
-        lines += [f"{x['symbol']} 매수가 {x['buy_price']:,.6g}" for x in h["coins"]]
-        notify("보유 목록", "\n".join(lines) if lines else "보유 종목이 없어요.\n" + HELP)
+    if t in ("목록", "보유목록", "리스트", "보유", "점검", "보유점검"):
+        items = [(x["name"], x, x.get("code")) for x in h["stocks"]] + [(x["symbol"], x, None) for x in h["coins"]]
+        if not items:
+            notify("보유 점검", "보유 종목이 없어요.\n'보유 종목명 매수가'로 등록해 주세요.")
+            return
+        lines = []
+        for label, x, code in items:
+            try:
+                rows = S.yahoo(x["yahoo"]) if "yahoo" in x else X.binance_rows(x["symbol"])
+                r = X.check(rows, x.get("buy_price"))
+                name = (f'<a href="https://alphasquare.co.kr/home/stock-summary?code={code}">{label}</a>'
+                        if code else label)
+                lines += [f"<b>{name}</b>  {r['close']:,.6g}  (매수가 {x['buy_price']:,.6g} 대비 {r['pnl_pct']:+.1f}%)",
+                          f"판정: {r['verdict']}",
+                          "이유: " + ", ".join(r["reasons"][:3]),
+                          f"10일선 {r['lines']['ma10']:,.6g}, 78.6% {r['lines']['fib786']:,.6g}", ""]
+            except Exception:  # noqa: BLE001
+                lines += [f"{label}  확인 실패", ""]
+        lines.append("판정 기준: 매도(바로 정리), 분할매도(일부 정리), 버티기(손실 중이지만 78.6% 위), 정상")
+        notify("보유 점검", "\n".join(lines))
         return
     notify("명령 안내", HELP)
 
