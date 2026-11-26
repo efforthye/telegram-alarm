@@ -176,8 +176,10 @@ def coin_symbol(q):
             return sym
     if not t.isascii() and len(key) >= 2:
         # '엑스알피(리플)' 처럼 괄호 안 이름이나 일부로 찾기 (하나만 맞을 때)
-        hits = [sym for sym, ko in up.items() if key in re.sub(r"[()\s]", "", ko) or
-                key in re.findall(r"\(([^)]*)\)", ko)]
+        paren = [sym for sym, ko in up.items() if key in re.findall(r"\(([^)]*)\)", ko)]
+        if len(paren) == 1:
+            return paren[0]
+        hits = [sym for sym, ko in up.items() if key in re.sub(r"[()\s]", "", ko)]
         if len(hits) == 1:
             return hits[0]
     return t.upper() if t.isascii() and find_coin(t) else None
