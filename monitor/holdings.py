@@ -273,9 +273,11 @@ def handle_subs(text, notify):
 
 
 # ------------------------------------------------------------------ 매도 신호
-def fmt_sell(label, res, buy_price):
+def fmt_sell(label, res, buy_price, item_code=None):
     ln = res["lines"]
-    out = [f"{label} 현재가: {res['close']:,.6g}"
+    code = (item_code or "")
+    out = [f"<b>{label}</b> 현재가: {res['close']:,.6g}"
+           + (f'  <a href="https://alphasquare.co.kr/home/stock-summary?code={code}">알파스퀘어</a>' if code else "")
            + (f" (매수가 {buy_price:,.6g} 대비 {res['pnl_pct']:+.1f}%)" if buy_price else ""),
            f"판정: {res['verdict']}",
            "이유: " + ", ".join(res["reasons"]),
@@ -315,7 +317,7 @@ def check_positions(st, notify, stock_hours_now):
             s["pend"] = lv
             if s["cnt"] >= 2 and lv >= 2:          # 분할매도/매도만 알림, 2번 연속 확인
                 title = f"{'보유 종목' if kind == '보유' else '신호 종목'} {res['verdict']} 신호: {label}"
-                notify(title, fmt_sell(label, res, item.get("buy_price") or item.get("entry")))
+                notify(title, fmt_sell(label, res, item.get("buy_price") or item.get("entry"), item.get("code")))
                 s["lv"], s["pend"], s["cnt"] = lv, 0, 0
                 if kind == "신호" and lv == 3:     # 신호 종목은 매도 알림 후 추적 종료
                     st.get("tracked_stocks", {}).pop(item.get("code", ""), None)

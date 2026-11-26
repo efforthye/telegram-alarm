@@ -208,7 +208,8 @@ def fmt_stock(r, label):
     t = lv["time"]
     strat = " + ".join(r.get("strategies", [])) or "-"
     lines = [
-        f"<b>{r['name']}</b> ({r['code']})" + (" [관심 종목]" if r.get("index") == "관심" else ""),
+        f"<b>{r['name']}</b> ({r['code']})" + (" [관심 종목]" if r.get("index") == "관심" else "")
+        + f"  {chart(r['code'])}",
         f"전략: {strat}, 점수 {r.get('rank_score', r['domain_score'])}",
         f"현재가: {r['close']:,.0f}원 ({r['chg_pct']:+.1f}%), 거래대금 {r['trade_value_eok']:,.0f}억",
         f"목표: {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%), 2차 {lv['target2']['price']:,} ({lv['target2']['pct']:+.0f}%)",
@@ -234,7 +235,7 @@ def bundle_stock(rs):
     for n, r in enumerate(rs[:BUNDLE_MAX], 1):
         lv = r["levels"]
         out.append(f"{n}. {r['name']} {r['close']:,.0f}원 ({r['chg_pct']:+.1f}%), 점수 {r.get('rank_score', r['domain_score'])}"
-                   + (" [강한 자리]" if r.get("strong_hits") else ""))
+                   + (" [강한 자리]" if r.get("strong_hits") else "") + f"  {chart(r['code'])}")
         out.append(f"   목표 {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%), "
                    f"손절 {lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%)")
     if len(rs) > BUNDLE_MAX:
@@ -347,6 +348,10 @@ def commands_only():
         log(f"commands {n}")
 
 
+def chart(code):
+    return f'<a href="https://alphasquare.co.kr/home/stock-summary?code={code}">알파스퀘어</a>'
+
+
 def _pct(x):
     return f"{x:+.1f}%"
 
@@ -361,7 +366,8 @@ def holdings_lines(include_stocks):
         try:
             rows = HD.S.yahoo(x["yahoo"]) if "yahoo" in x else HD.X.binance_rows(x["symbol"])
             r = HD.X.check(rows, x.get("buy_price"))
-            out.append(f"{label}  {r['close']:,.6g}  ({_pct(r['pnl_pct'] or 0)})  {r['verdict']}")
+            out.append(f"{label}  {r['close']:,.6g}  ({_pct(r['pnl_pct'] or 0)})  {r['verdict']}"
+                       + (f"  {chart(x['code'])}" if x.get("code") else ""))
         except Exception:  # noqa: BLE001
             out.append(f"{label}  확인 실패")
     return out
@@ -394,7 +400,8 @@ def report(kind):
                 L += ["", (f"<b>추천 종목</b> ({lp['date']} 종가 기준)" if lp.get("gate")
                            else f"<b>관찰 종목</b> ({lp['date']} 종가 기준, 매수 신호 아님)")]
                 for n, t in enumerate(lp["top"], 1):
-                    L += [f"{n}. {t['name']}  {t['close']:,.0f}원" + ("  [강한 자리]" if t.get("strong") else ""),
+                    L += [f"{n}. {t['name']}  {t['close']:,.0f}원" + ("  [강한 자리]" if t.get("strong") else "")
+                          + (f"  {chart(t['code'])}" if t.get("code") else ""),
                           f"   목표 {t['t1']['price']:,} ({t['t1']['pct']:+.0f}%), 손절 {t['stop']['price']:,} ({t['stop']['pct']:+.0f}%)"]
         except Exception:  # noqa: BLE001
             pass
@@ -426,7 +433,7 @@ def report(kind):
             for n, r in enumerate(d["passed"][:5], 1):
                 lv = r["levels"]
                 L += [f"{n}. {r['name']}  {r['close']:,.0f}원  ({_pct(r['chg_pct'])})"
-                      + ("  [강한 자리]" if r.get("strong_hits") else ""),
+                      + ("  [강한 자리]" if r.get("strong_hits") else "") + f"  {chart(r['code'])}",
                       f"   목표 {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%)",
                       f"   손절 {lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%)",
                       f"   10일 내 목표 {lv['time']['target1']['hit_10d']}%, 손절 {lv['time']['stop']['hit_10d']}%"]
@@ -436,11 +443,35 @@ def report(kind):
             L.append("조건 통과 종목 없음")
         tail = []
         notify("마감 브리핑", "\n".join(L + tail), 3, "subs")
+        # 매도 체크: 지난번 관찰/추천 종목이 오늘 매도 조건에 걸렸는지
+        pick_path = os.path.join(HERE, "last_picks.json")
+        try:
+            prev = json.load(open(pick_path))
+        except Exception:  # noqa: BLE001
+            prev = {}
+        today_codes = {r["code"] for r in d["passed"][:5]}
+        sell_lines = []
+        for t in prev.get("top", []):
+            if t.get("code") in today_codes or not t.get("yahoo"):
+                continue
+            try:
+                res = HD.X.check(HD.S.yahoo(t["yahoo"]), t["close"], t["stop"]["price"],
+                                 "B" if t.get("b") else None)
+                sell_lines.append(f"{t['name']}  {res['close']:,.0f}원  ({_pct(res['pnl_pct'] or 0)})  "
+                                  f"{res['verdict']}  {chart(t['code'])}")
+                if res["verdict"] in ("매도", "분할매도"):
+                    sell_lines.append("   " + ", ".join(res["reasons"][:2]))
+            except Exception:  # noqa: BLE001
+                pass
+        if sell_lines:
+            L += ["", f"<b>매도 체크</b> ({prev.get('date')} 관찰 종목 중 오늘 빠진 종목)"] + sell_lines
         try:
             json.dump({"date": d.get("data_date"), "gate": gate, "top": [
-                {"name": r["name"], "close": r["close"], "t1": r["levels"]["target1"],
-                 "stop": r["levels"]["stop"], "strong": bool(r.get("strong_hits"))} for r in d["passed"][:5]]},
-                open(os.path.join(HERE, "last_picks.json"), "w"), ensure_ascii=False)
+                {"name": r["name"], "code": r["code"], "yahoo": r.get("yahoo"), "close": r["close"],
+                 "t1": r["levels"]["target1"], "stop": r["levels"]["stop"],
+                 "strong": bool(r.get("strong_hits")),
+                 "b": any(z.startswith("B") for z in r.get("strategies", []))} for r in d["passed"][:5]]},
+                open(pick_path, "w"), ensure_ascii=False)
         except Exception:  # noqa: BLE001
             pass
         hl = holdings_lines(True)
