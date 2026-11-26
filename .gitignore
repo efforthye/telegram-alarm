@@ -5,3 +5,4 @@ monitor/krx_all.json
 monitor/monitor.log
 _state/
 __pycache__/
+monitor/last_picks.json

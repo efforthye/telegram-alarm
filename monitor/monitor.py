@@ -388,6 +388,16 @@ def report(kind):
              + f"  (코스피 {g('kospi').get('close', 0):,.0f})",
              "코인  " + ("상승 추세, 매수 신호 켜짐" if b["gate_ok"] else "하락 추세, 매수 대기")
              + f"  (BTC ${b['close']:,.0f})"]
+        try:
+            lp = json.load(open(os.path.join(HERE, "last_picks.json")))
+            if lp.get("top"):
+                L += ["", (f"<b>추천 종목</b> ({lp['date']} 종가 기준)" if lp.get("gate")
+                           else f"<b>관찰 종목</b> ({lp['date']} 종가 기준, 매수 신호 아님)")]
+                for n, t in enumerate(lp["top"], 1):
+                    L += [f"{n}. {t['name']}  {t['close']:,.0f}원" + ("  [강한 자리]" if t.get("strong") else ""),
+                          f"   목표 {t['t1']['price']:,} ({t['t1']['pct']:+.0f}%), 손절 {t['stop']['price']:,} ({t['stop']['pct']:+.0f}%)"]
+        except Exception:  # noqa: BLE001
+            pass
         if b["gate_ok"] and c["passed"]:
             L += ["", "<b>코인 신호</b>"] + [f"{r['symbol']}  ${r['now_price']:g}" for r in c["passed"][:3]]
         notify("아침 브리핑", "\n".join(L), 3, "subs")
@@ -411,21 +421,28 @@ def report(kind):
              "상승 추세, 매수 신호 켜짐" if gate else "하락 추세, 매수 대기",
              "(코스피 60일선 " + ("위, 상승 중" if gate else "아래 또는 하락 중") + ")",
              ""]
-        L.append("<b>신호</b>")
-        if gate and d["passed"]:
-            for n, r in enumerate(d["passed"][:3], 1):
+        L.append("<b>추천 종목</b>" if gate else "<b>관찰 종목</b> (시장 하락 추세라 매수 신호 아님)")
+        if d["passed"]:
+            for n, r in enumerate(d["passed"][:5], 1):
                 lv = r["levels"]
                 L += [f"{n}. {r['name']}  {r['close']:,.0f}원  ({_pct(r['chg_pct'])})"
                       + ("  [강한 자리]" if r.get("strong_hits") else ""),
                       f"   목표 {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%)",
                       f"   손절 {lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%)",
                       f"   10일 내 목표 {lv['time']['target1']['hit_10d']}%, 손절 {lv['time']['stop']['hit_10d']}%"]
-        elif gate:
-            L.append("조건 통과 종목 없음")
+            if len(d["passed"]) > 5:
+                L.append(f"외 {len(d['passed']) - 5}종목: " + ", ".join(r["name"] for r in d["passed"][5:]))
         else:
-            L.append(f"없음 (조건만 본 관찰 종목 {len(d['passed'])}개)")
+            L.append("조건 통과 종목 없음")
         tail = ["", "참고: 1년 반 백테스트 +125% (코스피 +80%), 최대 낙폭 -14%"]
         notify("마감 브리핑", "\n".join(L + tail), 3, "subs")
+        try:
+            json.dump({"date": d.get("data_date"), "gate": gate, "top": [
+                {"name": r["name"], "close": r["close"], "t1": r["levels"]["target1"],
+                 "stop": r["levels"]["stop"], "strong": bool(r.get("strong_hits"))} for r in d["passed"][:5]]},
+                open(os.path.join(HERE, "last_picks.json"), "w"), ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            pass
         hl = holdings_lines(True)
         notify("마감 브리핑", "\n".join(L + (["", "<b>보유 종목</b>"] + hl if hl else []) + tail), 3, "owner")
     else:

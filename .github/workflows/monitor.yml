@@ -46,7 +46,7 @@ jobs:
           else
             mkdir _state
           fi
-          for f in holdings.json state.json cmd_state.json krx_all.json monitor.log; do
+          for f in holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log; do
             [ -f "_state/$f" ] && cp "_state/$f" monitor/ || true
           done
           [ -f monitor/holdings.json ] || cp monitor/holdings.seed.json monitor/holdings.json
@@ -91,7 +91,7 @@ jobs:
         run: |
           cd _state
           [ -d .git ] || [ -f .git ] || { git init -q; git checkout -q --orphan state; }
-          for f in holdings.json state.json cmd_state.json krx_all.json; do
+          for f in holdings.json state.json cmd_state.json krx_all.json last_picks.json; do
             [ -f "../monitor/$f" ] && cp "../monitor/$f" . || true
           done
           [ -f ../monitor/monitor.log ] && tail -n 1000 ../monitor/monitor.log > monitor.log || true
