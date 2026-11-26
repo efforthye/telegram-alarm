@@ -509,6 +509,20 @@ def report(kind):
 if __name__ == "__main__":
     if "--commands" in sys.argv:
         commands_only()
+    elif "--setup-menu" in sys.argv:
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        for scope in ({"type": "default"}, {"type": "all_private_chats"}, {"type": "all_group_chats"}):
+            data = json.dumps({"commands": [{"command": c, "description": d} for c, d in HD.BOT_COMMANDS],
+                               "scope": scope}).encode()
+            req = urllib.request.Request(f"https://api.telegram.org/bot{token}/setMyCommands", data=data,
+                                         headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    print("setMyCommands", scope["type"], r.status, r.read().decode()[:100])
+            except Exception as e:  # noqa: BLE001
+                print("setMyCommands", scope["type"], "ERR", getattr(e, "code", ""), getattr(e, "read", lambda: b"")().decode()[:200])
+        with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getMyCommands", timeout=15) as r:
+            print("getMyCommands", [c["command"] for c in json.load(r)["result"]])
     elif "--report" in sys.argv:
         report(sys.argv[sys.argv.index("--report") + 1])
     else:

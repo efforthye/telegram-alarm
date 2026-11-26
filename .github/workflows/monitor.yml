@@ -87,7 +87,7 @@ jobs:
           print("chat id length:", len(c), "| 숫자만:", bool(re.fullmatch(r"-?\d{5,15}", c.strip())),
                 "| 앞뒤 공백/줄바꿈:", c != c.strip())
           '
-              sh coin/notify.sh "연결 테스트" "깃허브 액션에서 보낸 테스트 알림이에요." ;;
+              python3 -I monitor/monitor.py --setup-menu ;;
             *)            python3 -I monitor/monitor.py ;;
           esac
           [ "$MODE" = commands ] || tail -5 monitor/monitor.log || true
