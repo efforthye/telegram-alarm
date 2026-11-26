@@ -69,7 +69,16 @@ jobs:
           case "$MODE" in
             report-stock) python3 -I monitor/monitor.py --report stock ;;
             report-coin)  python3 -I monitor/monitor.py --report coin ;;
-            test)         sh coin/notify.sh "연결 테스트" "깃허브 액션에서 보낸 테스트 알림이에요." ;;
+            test)
+              python3 -I -c '
+          import os, re
+          t, c = os.environ.get("TELEGRAM_BOT_TOKEN", ""), os.environ.get("TELEGRAM_CHAT_ID", "")
+          print("token length:", len(t), "| 형식(숫자:35자):", bool(re.fullmatch(r"\d{6,12}:[A-Za-z0-9_-]{30,40}", t)),
+                "| 앞뒤 공백/줄바꿈:", t != t.strip())
+          print("chat id length:", len(c), "| 숫자만:", bool(re.fullmatch(r"-?\d{5,15}", c.strip())),
+                "| 앞뒤 공백/줄바꿈:", c != c.strip())
+          '
+              sh coin/notify.sh "연결 테스트" "깃허브 액션에서 보낸 테스트 알림이에요." ;;
             *)            python3 -I monitor/monitor.py ;;
           esac
           tail -5 monitor/monitor.log || true
