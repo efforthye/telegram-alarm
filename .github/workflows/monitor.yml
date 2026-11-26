@@ -44,7 +44,7 @@ jobs:
           PASS=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -d' ' -f1)
           if git ls-remote --exit-code --heads origin state >/dev/null; then
             git fetch -q --depth 1 origin state
-            mkdir -p _old && git --work-tree=_old checkout -q origin/state -- . && git reset -q
+            mkdir -p _old && git --work-tree=_old checkout -q FETCH_HEAD -- . && git reset -q
             if [ -f _old/state.enc ]; then
               openssl enc -d -aes-256-cbc -pbkdf2 -pass "pass:$PASS" -in _old/state.enc | tar xz -C monitor || echo "복호화 실패: 새 상태로 시작"
             else
@@ -97,7 +97,7 @@ jobs:
         run: |
           PASS=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -d' ' -f1)
           [ -f monitor/monitor.log ] && tail -n 1000 monitor/monitor.log > monitor/monitor.log.tmp && mv monitor/monitor.log.tmp monitor/monitor.log
-          FILES=$(cd monitor && ls holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log 2>/dev/null)
+          FILES=$(cd monitor && ls holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log 2>/dev/null || true)
           mkdir -p _new
           tar cz -C monitor $FILES | openssl enc -aes-256-cbc -pbkdf2 -salt -pass "pass:$PASS" -out _new/state.enc
           cd _new
