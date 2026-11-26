@@ -383,19 +383,11 @@ def report(kind):
         dt = m["detail"]
         g = lambda key: dt.get(key) or {}  # noqa: E731
         L = [f"{now:%Y-%m-%d} 장 시작 전", "",
-             "<b>밤사이 미국</b>",
-             f"나스닥  {_pct(g('nasdaq').get('chg_1d', 0))}",
-             f"S&P500  {_pct(g('sp500').get('chg_1d', 0))}",
-             f"환율  {g('usdkrw').get('close', 0):,.0f}원  (5일 {_pct(g('usdkrw').get('chg_5d', 0))})",
-             f"유가  ${g('wti').get('close', 0):,.1f}  (5일 {_pct(g('wti').get('chg_5d', 0))})",
-             "",
              "<b>오늘 시장 판정</b>",
              "주식  " + ("상승 추세, 매수 신호 켜짐" if m["gate_ok"] else "하락 추세, 매수 대기")
              + f"  (코스피 {g('kospi').get('close', 0):,.0f})",
              "코인  " + ("상승 추세, 매수 신호 켜짐" if b["gate_ok"] else "하락 추세, 매수 대기")
              + f"  (BTC ${b['close']:,.0f})"]
-        if m["notes"]:
-            L += ["", "<b>주의</b>"] + m["notes"]
         if b["gate_ok"] and c["passed"]:
             L += ["", "<b>코인 신호</b>"] + [f"{r['symbol']}  ${r['now_price']:g}" for r in c["passed"][:3]]
         notify("아침 브리핑", "\n".join(L), 3, "subs")
@@ -414,8 +406,6 @@ def report(kind):
              "<b>시장</b>",
              f"코스피  {k.get('close', 0):,.0f}  ({_pct(k.get('chg_1d', 0))})",
              f"코스닥  {q.get('close', 0):,.0f}  ({_pct(q.get('chg_1d', 0))})",
-             f"나스닥 전일  {_pct(ns.get('chg_1d', 0))}",
-             f"환율  {fx.get('close', 0):,.0f}원  (5일 {_pct(fx.get('chg_5d', 0))})",
              "",
              "<b>판정</b>",
              "상승 추세, 매수 신호 켜짐" if gate else "하락 추세, 매수 대기",
@@ -434,8 +424,6 @@ def report(kind):
             L.append("조건 통과 종목 없음")
         else:
             L.append(f"없음 (조건만 본 관찰 종목 {len(d['passed'])}개)")
-        if m["notes"]:
-            L += ["", "<b>주의</b>"] + m["notes"]
         tail = ["", "참고: 1년 반 백테스트 +125% (코스피 +80%), 최대 낙폭 -14%"]
         notify("마감 브리핑", "\n".join(L + tail), 3, "subs")
         hl = holdings_lines(True)
