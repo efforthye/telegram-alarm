@@ -79,14 +79,14 @@ def main():
     job, job_key = None, None
     last_save = time.time()
     M.log("bot start")
+    M.notify("봇 시작", f"{datetime.now(KST):%m-%d %H:%M} 명령을 바로 받을 수 있어요.\n/search 종목명 으로 검색해 보세요.", 3)
     while time.time() < DEADLINE:
         # 1) 명령: 최대 10초 기다렸다가 바로 처리
         if not os.environ.get("TELEGRAM_BOT_TOKEN"):
             time.sleep(10)
         try:
             n = HD.poll_commands(cst, M.notify, timeout=10)
-            if n:
-                M.log(f"bot commands {n}")
+            M.log(f"bot poll ok n={n} offset={cst.get('tg_offset')}") if n else None
         except Exception as e:  # noqa: BLE001
             M.log(f"bot poll ERR {str(e)[:100]}")
             time.sleep(5)

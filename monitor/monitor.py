@@ -32,8 +32,10 @@ CONFIRM = 2
 
 
 def log(msg):
+    line = f"{datetime.now(KST):%Y-%m-%d %H:%M:%S} {msg}"
+    print(line, flush=True)
     with open(LOG, "a") as f:
-        f.write(f"{datetime.now(KST):%Y-%m-%d %H:%M} {msg}\n")
+        f.write(line + "\n")
 
 
 def recipients(to):
