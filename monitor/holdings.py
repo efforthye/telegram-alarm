@@ -43,14 +43,8 @@ HELP = ("입력창에 / 를 치면 명령 메뉴가 나와요. 그룹에서는 /
         "/unwatch 제닉스로보틱스\n"
         "/watchlist\n"
         "\n"
-        "<b>다른 사람 초대</b>\n"
-        "상대가 봇에게 /start 를 보내면 요청이 와요\n"
-        "승인 123456789\n"
-        "구독해제 123456789\n"
-        "구독자\n"
-        "\n"
         "매수가를 빼면 현재가로 등록돼요.\n"
-        "명령은 다음 점검 때(최대 30분~1시간) 처리돼요.")
+        "보통 10초 안에 답장이 와요.")
 
 
 def load():
@@ -238,7 +232,7 @@ def handle(text, notify):
         h[key] = [x for x in h[key] if x[idk] != item[idk]] + [item]
         save(h)
         label = item.get("name") or item["symbol"]
-        notify("보유 등록 완료", f"{label} 매수가 {p:,.6g}로 등록했어요.\n이제 매도 규칙을 정기적으로 확인해요.")
+        notify("보유 등록 완료", f"{label} 매수가 {p:,.6g}로 등록했어요.\n이제 매도 규칙을 30분~1시간마다 확인하고, 매도 조건이 되면 바로 알려줘요.")
         return
     m = re.match(r"^(관심삭제|관심제거|관심해제)\s+(.+)$", t)
     if m:
@@ -265,7 +259,7 @@ def handle(text, notify):
         save(h)
         notify("관심 종목 등록", f"{item['name']} ({item['code']}) 등록했어요."
                + ("\n이미 기본 감시 대상(코스피200/코스닥150)이에요." if in_uni
-                  else "\n장중 30분마다 매수 조건을 확인해요."))
+                  else "\n장중 30분마다 매수 조건을 확인하고, 통과하면 매수 신호를 보내요 (코스피 상승 추세일 때)."))
         return
     m = re.match(r"^(삭제|매도완료|제거)\s+(.+)$", t)
     if m:
