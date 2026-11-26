@@ -146,6 +146,43 @@ def stock_candidates(q, limit=15):
     return out[:limit], len(out)
 
 
+def upbit_markets():
+    """업비트 원화 마켓 {심볼: 한글이름}."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request("https://api.upbit.com/v1/market/all",
+                                                           headers={"User-Agent": "monitor"}), timeout=15) as r:
+            return {m["market"][4:]: m["korean_name"] for m in json.load(r) if m["market"].startswith("KRW-")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def upbit_rows(sym, count=200):
+    url = f"https://api.upbit.com/v1/candles/days?market=KRW-{sym}&count={count}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "monitor"}), timeout=20) as r:
+        k = json.load(r)
+    return [(x["candle_date_time_kst"][:10], x["opening_price"], x["high_price"], x["low_price"],
+             x["trade_price"], x["candle_acc_trade_volume"]) for x in reversed(k)]
+
+
+def coin_symbol(q):
+    """심볼(SOL) 또는 업비트 한글 이름(솔라나)으로 심볼 찾기."""
+    t = q.strip()
+    up = upbit_markets()
+    if t.upper() in up:
+        return t.upper()
+    key = t.replace(" ", "")
+    for sym, ko in up.items():
+        if key == ko.replace(" ", ""):
+            return sym
+    if not t.isascii() and len(key) >= 2:
+        # '엑스알피(리플)' 처럼 괄호 안 이름이나 일부로 찾기 (하나만 맞을 때)
+        hits = [sym for sym, ko in up.items() if key in re.sub(r"[()\s]", "", ko) or
+                key in re.findall(r"\(([^)]*)\)", ko)]
+        if len(hits) == 1:
+            return hits[0]
+    return t.upper() if t.isascii() and find_coin(t) else None
+
+
 def find_coin(q):
     sym = q.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{2,12}", sym):
@@ -221,30 +258,47 @@ def search_stock(item):
 
 
 def search_coin(sym):
-    rows = X.binance_rows(sym)
-    ex = X.check(rows)
+    up = upbit_markets()
+    name = f"{sym} ({up[sym]})" if sym in up else sym
+    src, cur, rows = "바이낸스", "$", []
+    try:
+        rows = X.binance_rows(sym)
+    except Exception:  # noqa: BLE001
+        rows = []
+    if len(rows) < 90 and sym in up:
+        try:
+            u = upbit_rows(sym)
+            if len(u) > len(rows):
+                src, cur, rows = "업비트", "₩", u
+        except Exception:  # noqa: BLE001
+            pass
+    if not rows:
+        return f"<b>{name}</b>\n시세를 가져오지 못했어요."
     c = [r[4] for r in rows]
-    ma60 = sum(c[-60:]) / 60
-    ma60_prev = sum(c[-65:-5]) / 60
+    fmt = (lambda x: f"₩{x:,.0f}" if x >= 100 else f"₩{x:,.4g}") if cur == "₩" else (lambda x: f"${x:,.6g}")
+    L = [f"<b>{name}</b>", f"현재가 {fmt(c[-1])}  ({src} 기준)" + ("  업비트 상장" if sym in up else "")]
+    if len(c) >= 8:
+        L.append(f"7일 {_p((c[-1] / c[-8] - 1) * 100)}" + (f", 30일 {_p((c[-1] / c[-31] - 1) * 100)}" if len(c) >= 31 else ""))
     btc = [r[4] for r in X.binance_rows("BTC", 80)]
     btc_gate = btc[-1] > sum(btc[-60:]) / 60 > sum(btc[-65:-5]) / 60
+    L += ["", "<b>판정</b>", "코인 시장: " + ("상승 추세" if btc_gate else "하락 추세 (BTC 60일선 아래 또는 하락 중)")]
+    if len(rows) < 90:
+        L += [f"상장 {len(rows)}일이라 데이터가 부족해서 차트 판정은 못 해요."]
+        return "\n".join(L)
+    ex = X.check(rows)
+    ma60 = sum(c[-60:]) / 60
+    ma60_prev = sum(c[-65:-5]) / 60
     r7 = (c[-1] / c[-8] - 1) * 100
     b7 = (btc[-1] / btc[-8] - 1) * 100
     ln = ex["lines"]
-    L = [f"<b>{sym}</b>",
-         f"현재가 ${c[-1]:,.6g}",
-         "",
-         "<b>판정</b>",
-         "코인 시장: " + ("상승 추세" if btc_gate else "하락 추세 (BTC 60일선 아래 또는 하락 중)"),
-         f"60일선 ${ma60:,.6g} (" + ("위" if c[-1] > ma60 else "아래") + ", " + ("상승" if ma60 > ma60_prev else "하락") + " 중)",
-         f"7일 {_p(r7)} (BTC 대비 {r7 - b7:+.1f}%p)",
-         f"RSI {ex['rsi9']}",
-         "",
-         "<b>가격</b>",
-         f"전고점 ${ln['prev_high']:,.6g} ({_p((ln['prev_high'] / c[-1] - 1) * 100)})",
-         f"10일선 ${ln['ma10']:,.6g} ({_p((ln['ma10'] / c[-1] - 1) * 100)})",
-         f"78.6% ${ln['fib786']:,.6g} ({_p((ln['fib786'] / c[-1] - 1) * 100)})",
-         "", "<b>보유 중이라면</b>", f"{ex['verdict']}: " + ", ".join(ex["reasons"][:3])]
+    L += [f"60일선 {fmt(ma60)} (" + ("위" if c[-1] > ma60 else "아래") + ", " + ("상승" if ma60 > ma60_prev else "하락") + " 중)",
+          f"BTC 대비 7일 {r7 - b7:+.1f}%p",
+          f"RSI {ex['rsi9']}",
+          "", "<b>가격</b>",
+          f"전고점 {fmt(ln['prev_high'])} ({_p((ln['prev_high'] / c[-1] - 1) * 100)})",
+          f"10일선 {fmt(ln['ma10'])} ({_p((ln['ma10'] / c[-1] - 1) * 100)})",
+          f"78.6% {fmt(ln['fib786'])} ({_p((ln['fib786'] / c[-1] - 1) * 100)})",
+          "", "<b>보유 중이라면</b>", f"{ex['verdict']}: " + ", ".join(ex["reasons"][:3])]
     return "\n".join(L)
 
 
@@ -258,6 +312,10 @@ def handle(text, notify):
         if item:
             notify(f"종목 검색: {item['name']}", search_stock(item))
             return
+        csym = coin_symbol(q)
+        if csym and (q.upper() == csym or not q.isascii()):
+            notify(f"코인 검색: {csym}", search_coin(csym))
+            return
         cands, total = stock_candidates(q)
         if len(cands) == 1:
             notify(f"종목 검색: {cands[0]['name']}", search_stock(cands[0]))
@@ -269,8 +327,8 @@ def handle(text, notify):
             lines += ["", "분석할 종목을 이름 전체나 코드로 다시 보내주세요."]
             notify("종목 후보", "\n".join(lines))
             return
-        if find_coin(q):
-            notify(f"코인 검색: {q.upper()}", search_coin(q.upper()))
+        if csym:
+            notify(f"코인 검색: {csym}", search_coin(csym))
             return
         sim = similar_stocks(q)
         if len(sim) == 1:
