@@ -339,11 +339,9 @@ def report(kind):
     h = HD.load()
     if kind == "stock":
         d = run_json(STOCK_SCAN)
-        if not d.get("market_open_today"):
-            notify("오늘의 주식 점검", head + "휴장 (데이터 " + str(d.get("data_date")) + ")", )
-            return
         k = d["market"]["detail"].get("kospi") or {}
-        lines = [f"시장: 코스피 {k.get('close', 0):,.0f} ({k.get('chg_1d', 0):+.2f}%), "
+        lines = [f"기준: {d.get('data_date')} 종가" + ("" if d.get("market_open_today") else " (오늘 장 데이터 없음)"),
+                 f"시장: 코스피 {k.get('close', 0):,.0f} ({k.get('chg_1d', 0):+.2f}%), "
                  + ("상승 추세 (매수 신호 ON)" if d["market"]["gate_ok"] else "하락 추세 (매수 대기)")]
         if d["market"]["notes"]:
             lines.append("메모: " + ", ".join(d["market"]["notes"]))
