@@ -301,7 +301,7 @@ def handle(text, notify):
     notify("명령 안내", HELP)
 
 
-def poll_commands(st, notify):
+def poll_commands(st, notify, timeout=0):
     """텔레그램 봇으로 온 새 메시지 처리.
     주인(TELEGRAM_CHAT_ID): 모든 명령 가능.
     다른 사람: /start 를 보내면 주인에게 구독 요청이 간다. 주인이 '승인 ID' 하면 알림을 받는다.
@@ -312,8 +312,8 @@ def poll_commands(st, notify):
         return 0
     set_bot_commands(token, st)
     offset = st.get("tg_offset", 0)
-    url = f"https://api.telegram.org/bot{token}/getUpdates?timeout=0&offset={offset}"
-    with urllib.request.urlopen(urllib.request.Request(url), timeout=20) as r:
+    url = f"https://api.telegram.org/bot{token}/getUpdates?timeout={timeout}&offset={offset}"
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout + 20) as r:
         ups = json.load(r).get("result", [])
     to_owner = lambda t, b, *a: notify(t, b, 4, "owner")  # noqa: E731
     n = 0

@@ -307,10 +307,11 @@ def check_stocks(st, today):
 def main():
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
-    try:
-        commands_only()                               # 텔레그램 명령 먼저 처리
-    except Exception as e:  # noqa: BLE001
-        log(f"commands ERR {str(e)[:120]}")
+    if os.environ.get("BOT_MODE") != "1":             # 상시 봇이 아닐 때만 명령도 여기서 처리
+        try:
+            commands_only()
+        except Exception as e:  # noqa: BLE001
+            log(f"commands ERR {str(e)[:120]}")
     st = load_state()
     parts = []
     for name, fn in [("btc", lambda: check_btc(st)),
@@ -377,10 +378,11 @@ def holdings_lines(include_stocks):
 def report(kind):
     """하루 1번 요약 (무음 알림). kind: stock | coin"""
     now = datetime.now(KST)
-    try:
-        commands_only()
-    except Exception:  # noqa: BLE001
-        pass
+    if os.environ.get("BOT_MODE") != "1":
+        try:
+            commands_only()
+        except Exception:  # noqa: BLE001
+            pass
     h = HD.load()
     if kind == "morning":
         m = json.loads(subprocess.run([sys.executable, "-I", STOCK_SCAN, "--market"], capture_output=True,

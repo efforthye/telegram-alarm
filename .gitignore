@@ -6,3 +6,5 @@ monitor/monitor.log
 _state/
 __pycache__/
 monitor/last_picks.json
+_old/
+_new/

@@ -1,0 +1,54 @@
+name: alarm-bot
+
+# 상시 실행 봇. 한 번 실행하면 약 5시간 40분 동안 켜져 있으면서
+# 텔레그램 명령에 바로 답하고, 정해진 시각에 감시/브리핑을 돌린다.
+# 끝나기 전에 다음 실행을 스스로 띄워서 이어간다. 매시 정각 예약은 끊겼을 때 다시 살리는 용도.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 * * * *"
+
+concurrency:
+  group: alarm-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 상태 가져오기
+        run: bash scripts/state_restore.sh
+
+      - name: 경로 연결
+        run: |
+          mkdir -p ~/.claude/scheduled-tasks
+          ln -s "$GITHUB_WORKSPACE/coin"    ~/.claude/scheduled-tasks/coin-true-scanner
+          ln -s "$GITHUB_WORKSPACE/stock"   ~/.claude/scheduled-tasks/stock-true-scanner
+          ln -s "$GITHUB_WORKSPACE/monitor" ~/.claude/scheduled-tasks/live-monitor
+
+      - name: 봇 실행
+        run: python3 -I monitor/bot.py
+
+      - name: 상태 저장
+        if: always()
+        run: bash scripts/state_save.sh
+
+      - name: 다음 실행 띄우기
+        if: always()
+        run: gh workflow run bot.yml --ref main -R "$GITHUB_REPOSITORY"

@@ -1,16 +1,8 @@
 name: alarm-monitor
 
 # 시각은 UTC (한국시간 = UTC + 9)
+# 수동 실행 전용 (정기 작업은 alarm-bot 이 담당)
 on:
-  schedule:
-    - cron: "*/30 0-6 * * 1-5"   # 평일 09:00~15:30 KST: 주식 + 코인 + 매도 판정 (30분마다)
-    - cron: "45 6 * * 1-5"       # 평일 15:45 KST: 장 마감 직후 한 번 더
-    - cron: "15 7-23 * * 1-5"    # 평일 장외: 코인 + 매도 판정 (1시간마다)
-    - cron: "15 * * * 0,6"       # 주말: 코인 + 매도 판정 (1시간마다)
-    - cron: "30 23 * * 0-4"      # 평일 08:30 KST: 아침 브리핑 (UTC 일~목 23:30)
-    - cron: "30 7 * * 1-5"       # 평일 16:30 KST: 마감 브리핑
-    - cron: "0 0 * * 0,6"        # 주말 09:00 KST: 주말 코인 브리핑
-    - cron: "*/5 * * * *"        # 5분마다: 텔레그램 명령(검색, 보유, 관심)만 처리
   workflow_dispatch:
     inputs:
       mode:
@@ -18,7 +10,7 @@ on:
         default: monitor
 
 concurrency:
-  group: alarm-monitor
+  group: alarm-bot
   cancel-in-progress: false
 
 permissions:
@@ -39,21 +31,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 상태 가져오기 (암호화된 state 브랜치)
-        run: |
-          PASS=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -d' ' -f1)
-          if git ls-remote --exit-code --heads origin state >/dev/null; then
-            git fetch -q --depth 1 origin state
-            mkdir -p _old && git --work-tree=_old checkout -q FETCH_HEAD -- . && git reset -q
-            if [ -f _old/state.enc ]; then
-              openssl enc -d -aes-256-cbc -pbkdf2 -pass "pass:$PASS" -in _old/state.enc | tar xz -C monitor || echo "복호화 실패: 새 상태로 시작"
-            else
-              for f in holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log; do
-                [ -f "_old/$f" ] && cp "_old/$f" monitor/ || true
-              done
-            fi
-          fi
-          [ -f monitor/holdings.json ] || cp monitor/holdings.seed.json monitor/holdings.json
+      - name: 상태 가져오기
+        run: bash scripts/state_restore.sh
 
       - name: 경로 연결 (로컬과 같은 폴더 구조)
         run: |
@@ -92,19 +71,8 @@ jobs:
           esac
           [ "$MODE" = commands ] || tail -5 monitor/monitor.log || true
 
-      - name: 상태 저장 (암호화, 기록 없이 1개 커밋만 유지)
+      - name: 상태 저장
         if: always()
-        run: |
-          PASS=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -d' ' -f1)
-          [ -f monitor/monitor.log ] && tail -n 1000 monitor/monitor.log > monitor/monitor.log.tmp && mv monitor/monitor.log.tmp monitor/monitor.log
-          FILES=$(cd monitor && ls holdings.json state.json cmd_state.json krx_all.json last_picks.json monitor.log 2>/dev/null || true)
-          mkdir -p _new
-          tar cz -C monitor $FILES | openssl enc -aes-256-cbc -pbkdf2 -salt -pass "pass:$PASS" -out _new/state.enc
-          cd _new
-          git init -q
-          git checkout -q -b state
-          git config user.name "alarm-bot"
-          git config user.email "alarm-bot@users.noreply.github.com"
-          git add state.enc
-          git commit -q -m "state (encrypted)"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/state_save.sh
