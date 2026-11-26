@@ -99,6 +99,21 @@ def find_stock(q):
     return None
 
 
+def stock_candidates(q, limit=15):
+    """이름 일부로 후보 찾기. 코스피200/코스닥150 종목을 먼저, 그다음 나머지."""
+    key = q.replace(" ", "").upper()
+    if len(key) < 1:
+        return []
+    seen, out = set(), []
+    for src in (UNIVERSE, krx_all()):
+        for u in src:
+            if key in u["name"].replace(" ", "").upper() and u["code"] not in seen:
+                seen.add(u["code"])
+                out.append({"code": u["code"], "name": u["name"], "yahoo": u["yahoo"]})
+    out.sort(key=lambda x: (not x["name"].upper().startswith(key), len(x["name"])))
+    return out[:limit], len(out)
+
+
 def find_coin(q):
     sym = q.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{2,12}", sym):
@@ -210,6 +225,17 @@ def handle(text, notify):
         item = find_stock(q)
         if item:
             notify(f"종목 검색: {item['name']}", search_stock(item))
+            return
+        cands, total = stock_candidates(q)
+        if len(cands) == 1:
+            notify(f"종목 검색: {cands[0]['name']}", search_stock(cands[0]))
+            return
+        if cands:
+            lines = [f"'{q}' 검색 결과 {total}개" + (f" (상위 {len(cands)}개)" if total > len(cands) else ""), ""]
+            lines += [f'<a href="https://alphasquare.co.kr/home/stock-summary?code={c["code"]}">{c["name"]}</a>  /search {c["code"]}'
+                      for c in cands]
+            lines += ["", "분석할 종목을 이름 전체나 코드로 다시 보내주세요."]
+            notify("종목 후보", "\n".join(lines))
             return
         if find_coin(q):
             notify(f"코인 검색: {q.upper()}", search_coin(q.upper()))
