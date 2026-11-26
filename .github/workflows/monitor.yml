@@ -1,0 +1,96 @@
+name: alarm-monitor
+
+# 시각은 UTC (한국시간 = UTC + 9)
+on:
+  schedule:
+    - cron: "*/30 0-6 * * 1-5"   # 평일 09:00~15:30 KST: 주식 + 코인 + 매도 판정 (30분마다)
+    - cron: "45 6 * * 1-5"       # 평일 15:45 KST: 장 마감 직후 한 번 더
+    - cron: "15 7-23 * * 1-5"    # 평일 장외: 코인 + 매도 판정 (1시간마다)
+    - cron: "15 * * * 0,6"       # 주말: 코인 + 매도 판정 (1시간마다)
+    - cron: "20 0 * * *"         # 매일 09:20 KST: 오늘의 코인 점검
+    - cron: "20 7 * * 1-5"       # 평일 16:20 KST: 오늘의 주식 점검
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "monitor | report-stock | report-coin | test"
+        default: monitor
+
+concurrency:
+  group: alarm-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 상태 브랜치 가져오기
+        run: |
+          if git ls-remote --exit-code --heads origin state >/dev/null; then
+            git fetch --depth 1 origin state
+            git worktree add _state origin/state
+          else
+            mkdir _state
+          fi
+          for f in holdings.json state.json cmd_state.json krx_all.json monitor.log; do
+            [ -f "_state/$f" ] && cp "_state/$f" monitor/ || true
+          done
+          [ -f monitor/holdings.json ] || cp monitor/holdings.seed.json monitor/holdings.json
+
+      - name: 경로 연결 (로컬과 같은 폴더 구조)
+        run: |
+          mkdir -p ~/.claude/scheduled-tasks
+          ln -s "$GITHUB_WORKSPACE/coin"    ~/.claude/scheduled-tasks/coin-true-scanner
+          ln -s "$GITHUB_WORKSPACE/stock"   ~/.claude/scheduled-tasks/stock-true-scanner
+          ln -s "$GITHUB_WORKSPACE/monitor" ~/.claude/scheduled-tasks/live-monitor
+
+      - name: 실행
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          case "${{ github.event.schedule }}" in
+            "20 0 * * *")   MODE=report-coin ;;
+            "20 7 * * 1-5") MODE=report-stock ;;
+          esac
+          MODE="${MODE:-monitor}"
+          echo "mode=$MODE"
+          case "$MODE" in
+            report-stock) python3 -I monitor/monitor.py --report stock ;;
+            report-coin)  python3 -I monitor/monitor.py --report coin ;;
+            test)         sh coin/notify.sh "연결 테스트" "깃허브 액션에서 보낸 테스트 알림이에요." ;;
+            *)            python3 -I monitor/monitor.py ;;
+          esac
+          tail -5 monitor/monitor.log || true
+
+      - name: 상태 저장 (state 브랜치)
+        if: always()
+        run: |
+          cd _state
+          [ -d .git ] || [ -f .git ] || { git init -q; git checkout -q --orphan state; }
+          for f in holdings.json state.json cmd_state.json krx_all.json; do
+            [ -f "../monitor/$f" ] && cp "../monitor/$f" . || true
+          done
+          [ -f ../monitor/monitor.log ] && tail -n 1000 ../monitor/monitor.log > monitor.log || true
+          git config user.name "alarm-bot"
+          git config user.email "alarm-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -q -m "state $(date '+%Y-%m-%d %H:%M')"
+          if git remote | grep -q origin; then
+            git push -q origin HEAD:state
+          else
+            git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+            git push -q origin HEAD:state
+          fi
