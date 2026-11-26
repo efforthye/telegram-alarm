@@ -25,7 +25,12 @@ S = X.S
 KST = timezone(timedelta(hours=9))
 HOLD = os.path.join(HERE, "holdings.json")
 UNIVERSE = json.load(open(os.path.join(os.path.dirname(S.__file__), "universe.json")))
-HELP = ("<b>보유 종목</b> (매도 신호 감시)\n"
+HELP = ("<b>종목 검색</b>\n"
+        "검색 현대차\n"
+        "검색 005380\n"
+        "검색 SOL\n"
+        "\n"
+        "<b>보유 종목</b> (매도 신호 감시)\n"
         "보유 한미사이언스 55200\n"
         "보유 SOL 85.2\n"
         "삭제 한미사이언스\n"
@@ -116,9 +121,105 @@ def current_price(item):
     return X.binance_rows(item["symbol"], 1)[-1][4]
 
 
+# ------------------------------------------------------------------ 종목 검색
+def _p(x):
+    return f"{x:+.1f}%"
+
+
+def search_stock(item):
+    rows = S.yahoo(item["yahoo"])
+    a = S.analyze(rows)
+    if not a:
+        return f"<b>{item['name']}</b>\n데이터가 부족해서 판정할 수 없어요 (상장 기간이 짧음)."
+    ex = X.check(rows)
+    mk = S.market()
+    lv = a["levels"]
+    url = f"https://alphasquare.co.kr/home/stock-summary?code={item['code']}"
+    core = (not a["stagnant"]) and (a["domain_score"] >= 3 or a["macd_zero_cross"])
+    a_pass = a["buy_ok"] == 6 and core
+    b_pass = a["bb_ok"] == 3 and not a["stagnant"]
+    ok = (a_pass or b_pass) and not a["blockers"]
+    if a["stagnant"]:
+        verdict = "침체 구간, 매수 대상 아님"
+    elif ok and mk["gate_ok"]:
+        verdict = "매수 조건 통과"
+    elif ok:
+        verdict = "종목 조건 통과, 시장 하락 추세라 대기"
+    elif a["buy_ok"] >= 5 or a["bb_ok"] >= 2:
+        verdict = "근접 (조건 일부 미충족)"
+    else:
+        verdict = "매수 조건 미충족"
+    miss = [k for k, v in a["buy_checks"].items() if not v]
+    L = [f'<b><a href="{url}">{item["name"]}</a></b> ({item["code"]})',
+         f"{a['date']} 종가 {a['close']:,.0f}원 ({_p(a['chg_pct'])}), 거래대금 {a['trade_value_eok']:,.0f}억",
+         "",
+         "<b>판정</b>",
+         verdict,
+         "시장: " + ("상승 추세" if mk["gate_ok"] else "하락 추세 (코스피 60일선 아래 또는 하락 중)"),
+         "",
+         "<b>조건</b>",
+         f"6조건 {a['buy_ok']}/6" + (f" (빠짐: {', '.join(miss)})" if miss else ""),
+         f"볼린저/OBV {a['bb_ok']}/3",
+         f"도메인 점수 {a['domain_score']}" + (f" ({', '.join(a['domain_hits'])})" if a["domain_hits"] else ""),
+         f"RSI {a['indicators']['rsi9']}, 거래량 {a['indicators']['vol_ratio_20']}배"]
+    if a.get("strong_hits"):
+        L.append("강한 자리: " + ", ".join(a["strong_hits"]))
+    if a["warnings"]:
+        L += ["", "<b>주의</b>"] + a["warnings"]
+    t = lv.get("time", {})
+    L += ["", "<b>가격</b>",
+          f"목표 {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%)",
+          f"손절 {lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%, {lv['stop']['basis']})",
+          f"10일선 {lv['exit_line_ma10']['price']:,} ({lv['exit_line_ma10']['pct']:+.0f}%)"]
+    if t:
+        L.append(f"10일 내 목표 {t['target1']['hit_10d']}%, 손절 {t['stop']['hit_10d']}%")
+    L += ["", "<b>보유 중이라면</b>", f"{ex['verdict']}: " + ", ".join(ex["reasons"][:3])]
+    return "\n".join(L)
+
+
+def search_coin(sym):
+    rows = X.binance_rows(sym)
+    ex = X.check(rows)
+    c = [r[4] for r in rows]
+    ma60 = sum(c[-60:]) / 60
+    ma60_prev = sum(c[-65:-5]) / 60
+    btc = [r[4] for r in X.binance_rows("BTC", 80)]
+    btc_gate = btc[-1] > sum(btc[-60:]) / 60 > sum(btc[-65:-5]) / 60
+    r7 = (c[-1] / c[-8] - 1) * 100
+    b7 = (btc[-1] / btc[-8] - 1) * 100
+    ln = ex["lines"]
+    L = [f"<b>{sym}</b>",
+         f"현재가 ${c[-1]:,.6g}",
+         "",
+         "<b>판정</b>",
+         "코인 시장: " + ("상승 추세" if btc_gate else "하락 추세 (BTC 60일선 아래 또는 하락 중)"),
+         f"60일선 ${ma60:,.6g} (" + ("위" if c[-1] > ma60 else "아래") + ", " + ("상승" if ma60 > ma60_prev else "하락") + " 중)",
+         f"7일 {_p(r7)} (BTC 대비 {r7 - b7:+.1f}%p)",
+         f"RSI {ex['rsi9']}",
+         "",
+         "<b>가격</b>",
+         f"전고점 ${ln['prev_high']:,.6g} ({_p((ln['prev_high'] / c[-1] - 1) * 100)})",
+         f"10일선 ${ln['ma10']:,.6g} ({_p((ln['ma10'] / c[-1] - 1) * 100)})",
+         f"78.6% ${ln['fib786']:,.6g} ({_p((ln['fib786'] / c[-1] - 1) * 100)})",
+         "", "<b>보유 중이라면</b>", f"{ex['verdict']}: " + ", ".join(ex["reasons"][:3])]
+    return "\n".join(L)
+
+
 # ------------------------------------------------------------------ 명령 처리
 def handle(text, notify):
     t = text.strip()
+    m = re.match(r"^(검색|분석|조회)\s+(.+)$", t)
+    if m:
+        q = m.group(2).strip()
+        item = find_stock(q)
+        if item:
+            notify(f"종목 검색: {item['name']}", search_stock(item))
+            return
+        if find_coin(q):
+            notify(f"코인 검색: {q.upper()}", search_coin(q.upper()))
+            return
+        notify("검색 실패", f"'{q}'을(를) 찾지 못했어요.\n종목명, 6자리 코드, 코인 심볼로 보내주세요.")
+        return
     h = load()
     m = re.match(r"^(보유|추가|매수)\s+(.+?)(?:\s+([\d.,]+))?$", t)
     if m:
