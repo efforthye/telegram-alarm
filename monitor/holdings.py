@@ -332,6 +332,17 @@ def poll_commands(st, notify):
         if not cid or not text:
             continue
         n += 1
+        if cid != owner and ctype == "private" and owner.startswith("-") and is_group_member(token, owner, cid):
+            # 알림 그룹의 멤버가 개인 채팅으로 보낸 명령: 처리하고 개인 채팅으로 답장
+            if text in ("/start", "/help"):
+                text = "도움말"
+            reply = lambda t, b, *a: notify(t, b, 4, [cid])  # noqa: E731
+            try:
+                if not handle_subs(text, reply):
+                    handle(text, reply)
+            except Exception as e:  # noqa: BLE001
+                reply("명령 처리 실패", f"{text}\n{str(e)[:100]}")
+            continue
         if cid != owner:
             who = m.get("from", {})
             name = (who.get("first_name", "") + " " + who.get("last_name", "")).strip() or who.get("username", "")
@@ -353,6 +364,16 @@ def poll_commands(st, notify):
         except Exception as e:  # noqa: BLE001
             to_owner("명령 처리 실패", f"{text}\n{str(e)[:100]}")
     return n
+
+
+def is_group_member(token, group_id, user_id):
+    try:
+        url = f"https://api.telegram.org/bot{token}/getChatMember?chat_id={group_id}&user_id={user_id}"
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=15) as r:
+            st = json.load(r).get("result", {}).get("status")
+        return st in ("creator", "administrator", "member", "restricted")
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def handle_subs(text, notify):
