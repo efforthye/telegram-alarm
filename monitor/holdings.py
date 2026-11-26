@@ -199,14 +199,11 @@ def poll_commands(st, notify):
     n = 0
     for u in ups:
         st["tg_offset"] = u["update_id"] + 1
-        m = u.get("message") or u.get("edited_message") or {}
+        m = u.get("message") or u.get("edited_message") or u.get("my_chat_member") or {}
         cid = str(m.get("chat", {}).get("id", ""))
         text = (m.get("text") or "").strip()
-        if not cid or not text:
-            continue
-        n += 1
         ctype = m.get("chat", {}).get("type")
-        if cid != owner and ctype in ("group", "supergroup"):
+        if cid and cid != owner and ctype in ("group", "supergroup"):
             # 아직 연결 안 된 그룹: 주인에게 그룹 ID를 한 번 알려준다
             told = st.setdefault("groups_told", [])
             if cid not in told:
@@ -215,6 +212,9 @@ def poll_commands(st, notify):
                        "이 그룹으로 알림을 받으려면 깃허브 Secrets의 TELEGRAM_CHAT_ID 값을 위 그룹 ID로 바꾸세요.",
                        4, "owner")
             continue
+        if not cid or not text:
+            continue
+        n += 1
         if cid != owner:
             who = m.get("from", {})
             name = (who.get("first_name", "") + " " + who.get("last_name", "")).strip() or who.get("username", "")
