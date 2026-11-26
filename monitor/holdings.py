@@ -25,21 +25,23 @@ S = X.S
 KST = timezone(timedelta(hours=9))
 HOLD = os.path.join(HERE, "holdings.json")
 UNIVERSE = json.load(open(os.path.join(os.path.dirname(S.__file__), "universe.json")))
-HELP = ("<b>종목 검색</b>\n"
-        "검색 현대차\n"
-        "검색 005380\n"
-        "검색 SOL\n"
+HELP = ("입력창에 / 를 치면 명령 메뉴가 나와요. 그룹에서는 / 명령만 읽을 수 있어요.\n"
+        "\n"
+        "<b>종목 검색</b>\n"
+        "/search 현대차  (또는 /검색 현대차, 검색 현대차)\n"
+        "/search 005380\n"
+        "/search SOL\n"
         "\n"
         "<b>보유 종목</b> (매도 신호 감시)\n"
-        "보유 한미사이언스 55200\n"
-        "보유 SOL 85.2\n"
-        "삭제 한미사이언스\n"
-        "목록  (보유 종목별 지금 판정)\n"
+        "/hold 한미사이언스 55200\n"
+        "/hold SOL 85.2\n"
+        "/del 한미사이언스\n"
+        "/list  (보유 종목별 지금 판정)\n"
         "\n"
         "<b>관심 종목</b> (매수 신호 감시)\n"
-        "관심 제닉스로보틱스\n"
-        "관심삭제 제닉스로보틱스\n"
-        "관심목록\n"
+        "/watch 제닉스로보틱스\n"
+        "/unwatch 제닉스로보틱스\n"
+        "/watchlist\n"
         "\n"
         "<b>다른 사람 초대</b>\n"
         "상대가 봇에게 /start 를 보내면 요청이 와요\n"
@@ -308,6 +310,7 @@ def poll_commands(st, notify):
     owner = (os.environ.get("TELEGRAM_CHAT_ID") or "").split(",")[0].strip()
     if not token or not owner:
         return 0
+    set_bot_commands(token, st)
     offset = st.get("tg_offset", 0)
     url = f"https://api.telegram.org/bot{token}/getUpdates?timeout=0&offset={offset}"
     with urllib.request.urlopen(urllib.request.Request(url), timeout=20) as r:
@@ -318,7 +321,7 @@ def poll_commands(st, notify):
         st["tg_offset"] = u["update_id"] + 1
         m = u.get("message") or u.get("edited_message") or u.get("my_chat_member") or {}
         cid = str(m.get("chat", {}).get("id", ""))
-        text = (m.get("text") or "").strip()
+        text = normalize(m.get("text") or "")
         ctype = m.get("chat", {}).get("type")
         if cid and cid != owner and ctype in ("group", "supergroup"):
             # 아직 연결 안 된 그룹: 주인에게 그룹 ID를 한 번 알려준다
@@ -364,6 +367,47 @@ def poll_commands(st, notify):
         except Exception as e:  # noqa: BLE001
             to_owner("명령 처리 실패", f"{text}\n{str(e)[:100]}")
     return n
+
+
+ALIASES = {
+    "search": "검색", "s": "검색", "hold": "보유", "buy": "보유", "del": "삭제", "sold": "삭제",
+    "list": "목록", "check": "목록", "watch": "관심", "unwatch": "관심삭제", "watchlist": "관심목록",
+    "help": "도움말", "start": "도움말", "subs": "구독자", "approve": "승인",
+}
+BOT_COMMANDS = [
+    ("search", "종목/코인 검색. 예: /search 현대차"),
+    ("list", "보유 종목 지금 판정 (매도/버티기)"),
+    ("hold", "보유 등록. 예: /hold 한미사이언스 55200"),
+    ("del", "보유 삭제. 예: /del 한미사이언스"),
+    ("watch", "관심 종목 등록. 예: /watch 제닉스로보틱스"),
+    ("unwatch", "관심 종목 삭제"),
+    ("watchlist", "관심 종목 목록"),
+    ("help", "명령 안내"),
+]
+
+
+def normalize(text):
+    """'/search@봇 현대차' -> '검색 현대차', '/검색 현대차' -> '검색 현대차'"""
+    t = text.strip()
+    if not t.startswith("/"):
+        return t
+    head, _, rest = t[1:].partition(" ")
+    head = head.split("@")[0]
+    head = ALIASES.get(head.lower(), head)
+    return (head + " " + rest).strip()
+
+
+def set_bot_commands(token, st):
+    if st.get("cmds_v") == 1:
+        return
+    try:
+        data = json.dumps({"commands": [{"command": c, "description": d} for c, d in BOT_COMMANDS]}).encode()
+        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/setMyCommands", data=data,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15):
+            st["cmds_v"] = 1
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def is_group_member(token, group_id, user_id):
