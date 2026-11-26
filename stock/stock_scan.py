@@ -43,9 +43,20 @@ def yahoo(symbol, rng="2y"):
             with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=20) as r:
                 res = json.load(r)["chart"]["result"][0]
             q = res["indicators"]["quote"][0]
+            meta = res.get("meta", {})
+            ts_all = res.get("timestamp") or []
             rows = []
-            for i, ts in enumerate(res.get("timestamp") or []):
+            for i, ts in enumerate(ts_all):
                 o, h, l, c, v = (q[k][i] for k in ("open", "high", "low", "close", "volume"))
+                # 마지막 봉이 비어 있으면(야후 지연) 현재가 정보로 채운다
+                if c is None and i == len(ts_all) - 1 and meta.get("regularMarketPrice") and \
+                        datetime.fromtimestamp(meta.get("regularMarketTime", 0), KST).date() == \
+                        datetime.fromtimestamp(ts, KST).date():
+                    c = meta["regularMarketPrice"]
+                    h = h or meta.get("regularMarketDayHigh") or c
+                    l = l or meta.get("regularMarketDayLow") or c  # noqa: E741
+                    o = o or (rows[-1][4] if rows else c)
+                    v = v or meta.get("regularMarketVolume") or 0
                 if None in (o, h, l, c) or c <= 0:
                     continue
                 d = datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d")
