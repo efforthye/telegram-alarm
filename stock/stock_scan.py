@@ -36,6 +36,20 @@ UA = {"User-Agent": "Mozilla/5.0"}
 
 
 # ---------------------------------------------------------------- 데이터
+def intraday(symbol):
+    """오늘 5분봉으로 (시가, 고가, 저가, 거래량). 실패하면 None들."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=5m"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15) as r:
+            q = json.load(r)["chart"]["result"][0]["indicators"]["quote"][0]
+        o = next((x for x in q["open"] if x), None)
+        hs = [x for x in q["high"] if x]
+        ls = [x for x in q["low"] if x]
+        return o, (max(hs) if hs else None), (min(ls) if ls else None), sum(x for x in q["volume"] if x)
+    except Exception:  # noqa: BLE001
+        return None, None, None, None
+
+
 def yahoo(symbol, rng="2y"):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={rng}&interval=1d"
     for attempt in range(3):
@@ -48,15 +62,17 @@ def yahoo(symbol, rng="2y"):
             rows = []
             for i, ts in enumerate(ts_all):
                 o, h, l, c, v = (q[k][i] for k in ("open", "high", "low", "close", "volume"))
-                # 마지막 봉이 비어 있으면(야후 지연) 현재가 정보로 채운다
-                if c is None and i == len(ts_all) - 1 and meta.get("regularMarketPrice") and \
-                        datetime.fromtimestamp(meta.get("regularMarketTime", 0), KST).date() == \
-                        datetime.fromtimestamp(ts, KST).date():
-                    c = meta["regularMarketPrice"]
-                    h = h or meta.get("regularMarketDayHigh") or c
-                    l = l or meta.get("regularMarketDayLow") or c  # noqa: E741
-                    o = o or (rows[-1][4] if rows else c)
-                    v = v or meta.get("regularMarketVolume") or 0
+                # 마지막 봉이 비어 있으면(야후 지연) 5분봉 합계와 현재가로 채운다
+                last = i == len(ts_all) - 1 and meta.get("regularMarketPrice") and \
+                    datetime.fromtimestamp(meta.get("regularMarketTime", 0), KST).date() == \
+                    datetime.fromtimestamp(ts, KST).date()
+                if last and (c is None or not o or not v):
+                    io, ih, il, iv = intraday(symbol)
+                    c = c or meta["regularMarketPrice"]
+                    o = o or io or (rows[-1][4] if rows else c)
+                    h = h or ih or meta.get("regularMarketDayHigh") or c
+                    l = l or il or meta.get("regularMarketDayLow") or c  # noqa: E741
+                    v = v or iv or meta.get("regularMarketVolume") or 0
                 if None in (o, h, l, c) or c <= 0:
                     continue
                 d = datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d")

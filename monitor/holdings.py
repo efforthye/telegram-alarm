@@ -88,7 +88,7 @@ def krx_all():
 
 def find_stock(q):
     q = q.strip()
-    norm = lambda x: x.replace(" ", "").upper()  # noqa: E731
+    norm = norm_name
     for src in (UNIVERSE, krx_all()):
         for u in src:
             names = [u["name"]] + ([u["alias"]] if u.get("alias") else [])
@@ -101,19 +101,48 @@ def find_stock(q):
     return None
 
 
+KO_EN = [("에스케이", "SK"), ("엘지", "LG"), ("케이티", "KT"), ("씨제이", "CJ"), ("엘에스", "LS"),
+         ("에이치디", "HD"), ("지에스", "GS"), ("케이비", "KB"), ("디비", "DB"), ("에이치엘", "HL")]
+
+
+def norm_name(x):
+    t = x.replace(" ", "").upper()
+    for ko, en in KO_EN:
+        t = t.replace(ko, en)
+    return t
+
+
+def similar_stocks(q, limit=8):
+    """철자가 비슷한 종목 (오타 대비)."""
+    import difflib
+    key = norm_name(q)
+    pool = {}
+    for src in (UNIVERSE, krx_all()):
+        for u in src:
+            for n in [u["name"]] + ([u["alias"]] if u.get("alias") else []):
+                pool.setdefault(norm_name(n), {"code": u["code"], "name": u["name"], "yahoo": u["yahoo"]})
+    hits = difflib.get_close_matches(key, list(pool), n=limit, cutoff=0.6)
+    out, seen = [], set()
+    for h in hits:
+        if pool[h]["code"] not in seen:
+            seen.add(pool[h]["code"])
+            out.append(pool[h])
+    return out
+
+
 def stock_candidates(q, limit=15):
     """이름 일부로 후보 찾기. 코스피200/코스닥150 종목을 먼저, 그다음 나머지."""
-    key = q.replace(" ", "").upper()
+    key = norm_name(q)
     if len(key) < 1:
-        return []
+        return [], 0
     seen, out = set(), []
     for src in (UNIVERSE, krx_all()):
         for u in src:
             names = [u["name"]] + ([u["alias"]] if u.get("alias") else [])
-            if any(key in n.replace(" ", "").upper() for n in names) and u["code"] not in seen:
+            if any(key in norm_name(n) for n in names) and u["code"] not in seen:
                 seen.add(u["code"])
                 out.append({"code": u["code"], "name": u["name"], "yahoo": u["yahoo"]})
-    out.sort(key=lambda x: (not x["name"].upper().startswith(key), len(x["name"])))
+    out.sort(key=lambda x: (not norm_name(x["name"]).startswith(key), len(x["name"])))
     return out[:limit], len(out)
 
 
@@ -242,6 +271,16 @@ def handle(text, notify):
             return
         if find_coin(q):
             notify(f"코인 검색: {q.upper()}", search_coin(q.upper()))
+            return
+        sim = similar_stocks(q)
+        if len(sim) == 1:
+            notify(f"종목 검색: {sim[0]['name']}", f"'{q}' 대신 '{sim[0]['name']}'(으)로 찾았어요.\n\n" + search_stock(sim[0]))
+            return
+        if sim:
+            lines = [f"'{q}'은(는) 없어요. 혹시 이 종목인가요?", ""]
+            lines += [f'<a href="https://alphasquare.co.kr/home/stock-summary?code={c["code"]}">{c["name"]}</a>  /search {c["code"]}'
+                      for c in sim]
+            notify("비슷한 종목", "\n".join(lines))
             return
         notify("검색 실패", f"'{q}'을(를) 찾지 못했어요.\n종목명, 6자리 코드, 코인 심볼로 보내주세요.")
         return
