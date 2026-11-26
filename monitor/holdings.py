@@ -25,23 +25,32 @@ S = X.S
 KST = timezone(timedelta(hours=9))
 HOLD = os.path.join(HERE, "holdings.json")
 UNIVERSE = json.load(open(os.path.join(os.path.dirname(S.__file__), "universe.json")))
-HELP = ("명령 예시\n"
+HELP = ("<b>보유 종목</b> (매도 신호 감시)\n"
         "보유 한미사이언스 55200\n"
-        "보유 008930 55200\n"
         "보유 SOL 85.2\n"
         "삭제 한미사이언스\n"
         "목록\n"
+        "\n"
+        "<b>관심 종목</b> (매수 신호 감시)\n"
         "관심 제닉스로보틱스\n"
         "관심삭제 제닉스로보틱스\n"
         "관심목록\n"
-        "※ 매수가를 빼면 현재가로 등록")
+        "\n"
+        "<b>다른 사람 초대</b>\n"
+        "상대가 봇에게 /start 를 보내면 요청이 와요\n"
+        "승인 123456789\n"
+        "구독해제 123456789\n"
+        "구독자\n"
+        "\n"
+        "매수가를 빼면 현재가로 등록돼요.\n"
+        "명령은 다음 점검 때(최대 30분~1시간) 처리돼요.")
 
 
 def load():
     try:
         return json.load(open(HOLD))
     except Exception:  # noqa: BLE001
-        return {"stocks": [], "coins": [], "watch": []}
+        return {"stocks": [], "coins": [], "watch": [], "subscribers": [], "pending": {}}
 
 
 def save(h):
@@ -174,29 +183,93 @@ def handle(text, notify):
 
 
 def poll_commands(st, notify):
-    """텔레그램 봇으로 온 새 메시지를 읽어 처리한다. 내 채팅(TELEGRAM_CHAT_ID)에서 온 것만."""
-    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat:
+    """텔레그램 봇으로 온 새 메시지 처리.
+    주인(TELEGRAM_CHAT_ID): 모든 명령 가능.
+    다른 사람: /start 를 보내면 주인에게 구독 요청이 간다. 주인이 '승인 ID' 하면 알림을 받는다.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    owner = (os.environ.get("TELEGRAM_CHAT_ID") or "").split(",")[0].strip()
+    if not token or not owner:
         return 0
     offset = st.get("tg_offset", 0)
     url = f"https://api.telegram.org/bot{token}/getUpdates?timeout=0&offset={offset}"
     with urllib.request.urlopen(urllib.request.Request(url), timeout=20) as r:
         ups = json.load(r).get("result", [])
+    to_owner = lambda t, b, *a: notify(t, b, 4, "owner")  # noqa: E731
     n = 0
     for u in ups:
         st["tg_offset"] = u["update_id"] + 1
         m = u.get("message") or u.get("edited_message") or {}
-        if str(m.get("chat", {}).get("id")) != str(chat) or not m.get("text"):
+        cid = str(m.get("chat", {}).get("id", ""))
+        text = (m.get("text") or "").strip()
+        if not cid or not text:
             continue
-        text = m["text"].strip()
+        n += 1
+        ctype = m.get("chat", {}).get("type")
+        if cid != owner and ctype in ("group", "supergroup"):
+            # 아직 연결 안 된 그룹: 주인에게 그룹 ID를 한 번 알려준다
+            told = st.setdefault("groups_told", [])
+            if cid not in told:
+                told.append(cid)
+                notify("그룹 발견", f"그룹: {m['chat'].get('title', '')}\n그룹 ID: {cid}\n\n"
+                       "이 그룹으로 알림을 받으려면 깃허브 Secrets의 TELEGRAM_CHAT_ID 값을 위 그룹 ID로 바꾸세요.",
+                       4, "owner")
+            continue
+        if cid != owner:
+            who = m.get("from", {})
+            name = (who.get("first_name", "") + " " + who.get("last_name", "")).strip() or who.get("username", "")
+            h = load()
+            if any(str(x["id"]) == cid for x in h.get("subscribers", [])):
+                notify("안내", "이미 알림을 받고 있어요.\n시장 신호와 브리핑이 이 채팅으로 와요.", 3, [cid])
+                continue
+            notify("구독 요청", f"{name} (@{who.get('username', '-')})\nID: {cid}\n\n승인하려면 이렇게 보내세요:\n승인 {cid}",
+                   4, "owner")
+            notify("요청 보냄", "알림 받기 요청을 보냈어요.\n승인되면 이 채팅으로 알림이 와요.", 3, [cid])
+            h.setdefault("pending", {})[cid] = name
+            save(h)
+            continue
         if text in ("/start", "/help"):
             text = "도움말"
         try:
-            handle(text, notify)
+            if not handle_subs(text, notify):
+                handle(text, to_owner)
         except Exception as e:  # noqa: BLE001
-            notify("명령 처리 실패", f"{text}\n{str(e)[:100]}")
-        n += 1
+            to_owner("명령 처리 실패", f"{text}\n{str(e)[:100]}")
     return n
+
+
+def handle_subs(text, notify):
+    """주인의 구독자 관리 명령. 처리했으면 True."""
+    h = load()
+    m = re.match(r"^승인\s+(-?\d+)$", text)
+    if m:
+        cid = m.group(1)
+        name = h.get("pending", {}).pop(cid, cid)
+        h["subscribers"] = [x for x in h.get("subscribers", []) if str(x["id"]) != cid] + [{"id": cid, "name": name}]
+        save(h)
+        notify("구독 승인", f"{name} ({cid}) 님이 이제 알림을 받아요.", 4, "owner")
+        notify("알림 시작", "승인됐어요. 이제 시장 신호와 아침/마감 브리핑이 이 채팅으로 와요.", 4, [cid])
+        return True
+    m = re.match(r"^(구독해제|구독삭제)\s+(.+)$", text)
+    if m:
+        q = m.group(2).strip()
+        before = len(h.get("subscribers", []))
+        gone = [x for x in h.get("subscribers", []) if q in (str(x["id"]), x["name"])]
+        h["subscribers"] = [x for x in h.get("subscribers", []) if x not in gone]
+        save(h)
+        notify("구독 해제", f"{q} {'해제했어요' if len(h['subscribers']) != before else '구독자 목록에 없어요'}", 4, "owner")
+        for x in gone:
+            notify("알림 종료", "알림 받기가 해제됐어요.", 3, [x["id"]])
+        return True
+    if text in ("구독자", "구독자목록"):
+        subs = h.get("subscribers", [])
+        pend = h.get("pending", {})
+        lines = ["<b>구독자</b>"] + ([f"{x['name']} ({x['id']})" for x in subs] or ["없음"])
+        if pend:
+            lines += ["", "<b>승인 대기</b>"] + [f"{v} ({k})  승인 {k}" for k, v in pend.items()]
+        notify("구독자 목록", "\n".join(lines), 4, "owner")
+        return True
+    return False
 
 
 # ------------------------------------------------------------------ 매도 신호

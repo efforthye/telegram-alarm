@@ -7,12 +7,13 @@ on:
     - cron: "45 6 * * 1-5"       # 평일 15:45 KST: 장 마감 직후 한 번 더
     - cron: "15 7-23 * * 1-5"    # 평일 장외: 코인 + 매도 판정 (1시간마다)
     - cron: "15 * * * 0,6"       # 주말: 코인 + 매도 판정 (1시간마다)
-    - cron: "20 0 * * *"         # 매일 09:20 KST: 오늘의 코인 점검
-    - cron: "20 7 * * 1-5"       # 평일 16:20 KST: 오늘의 주식 점검
+    - cron: "30 23 * * 0-4"      # 평일 08:30 KST: 아침 브리핑 (UTC 일~목 23:30)
+    - cron: "30 7 * * 1-5"       # 평일 16:30 KST: 마감 브리핑
+    - cron: "0 0 * * 0,6"        # 주말 09:00 KST: 주말 코인 브리핑
   workflow_dispatch:
     inputs:
       mode:
-        description: "monitor | report-stock | report-coin | test"
+        description: "monitor | report-morning | report-stock | report-coin | test"
         default: monitor
 
 concurrency:
@@ -61,14 +62,16 @@ jobs:
         run: |
           MODE="${{ github.event.inputs.mode }}"
           case "${{ github.event.schedule }}" in
-            "20 0 * * *")   MODE=report-coin ;;
-            "20 7 * * 1-5") MODE=report-stock ;;
+            "30 23 * * 0-4") MODE=report-morning ;;
+            "30 7 * * 1-5")  MODE=report-stock ;;
+            "0 0 * * 0,6")   MODE=report-coin ;;
           esac
           MODE="${MODE:-monitor}"
           echo "mode=$MODE"
           case "$MODE" in
             report-stock) python3 -I monitor/monitor.py --report stock ;;
             report-coin)  python3 -I monitor/monitor.py --report coin ;;
+            report-morning) python3 -I monitor/monitor.py --report morning ;;
             test)
               python3 -I -c '
           import os, re

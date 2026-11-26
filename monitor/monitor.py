@@ -36,13 +36,32 @@ def log(msg):
         f.write(f"{datetime.now(KST):%Y-%m-%d %H:%M} {msg}\n")
 
 
-def notify(title, body, pr=4):
+def recipients(to):
+    owner = (os.environ.get("TELEGRAM_CHAT_ID") or "").split(",")[0].strip()
+    subs = [str(x["id"]) for x in HD.load().get("subscribers", [])]
+    if to == "owner":
+        return [owner]
+    if to == "subs":
+        return subs
+    if isinstance(to, (list, tuple)):
+        return [str(x) for x in to]
+    return [owner] + [x for x in subs if x != owner]
+
+
+def notify(title, body, pr=4, to=None):
+    ids = ",".join(x for x in recipients(to) if x)
+    if not ids:
+        return
     try:
-        out = subprocess.run(["sh", NOTIFY, title, body[:1500], str(pr)], capture_output=True,
-                             text=True, timeout=30).stdout.strip()
+        out = subprocess.run(["sh", NOTIFY, title, body[:3500], str(pr), ids], capture_output=True,
+                             text=True, timeout=60).stdout.strip()
     except Exception as e:  # noqa: BLE001
         out = f"err {e}"
-    log(f"NOTIFY [{title}] {body} -> {out}")
+    log(f"NOTIFY [{title}] to={len(ids.split(','))} -> {out}")
+
+
+def notify_owner(title, body, pr=4, to="owner"):
+    notify(title, body, pr, to)
 
 
 def run_json(script, env_extra=None):
@@ -109,9 +128,9 @@ def check_btc(st):
     else:
         b["pend"], b["cnt"] = zone, 1
     if b["cnt"] >= CONFIRM:
-        msg = {"up": f"[BTC 상승 전환 신호] 61.3k 돌파 유지\n현재가: ${p:,.0f}\n저점과 고점 모두 높아짐, 상승 전환 신호\n※ 일봉 종가(09:00)로 최종 확인",
-               "down": f"[BTC 하락 경계] 58.9k 이탈 유지\n현재가: ${p:,.0f}\n반등 실패, 추가 하락 경계\n※ 일봉 종가(09:00)로 최종 확인",
-               "mid": f"[BTC 박스 복귀]\n현재가: ${p:,.0f}\n58.9k~61.3k 사이, 바닥 다지기"}[zone]
+        msg = {"up": f"<b>BTC 상승 전환 신호</b> 61.3k 돌파 유지\n현재가: ${p:,.0f}\n저점과 고점 모두 높아짐, 상승 전환 신호\n※ 일봉 종가(09:00)로 최종 확인",
+               "down": f"<b>BTC 하락 경계</b> 58.9k 이탈 유지\n현재가: ${p:,.0f}\n반등 실패, 추가 하락 경계\n※ 일봉 종가(09:00)로 최종 확인",
+               "mid": f"<b>BTC 박스 복귀</b>\n현재가: ${p:,.0f}\n58.9k~61.3k 사이, 바닥 다지기"}[zone]
         notify("BTC 가격대 변화", msg)
         b["zone"], b["pend"], b["cnt"] = zone, None, 0
     return p
@@ -127,7 +146,7 @@ def fmt_coin(r, label):
     hs = tm.get("stop", {}).get("hit_14d")
     ex = "/".join(r.get("kr_exchanges", [])) or "-"
     return "\n".join([
-        f"{r['symbol']}  ({ex})",
+        f"<b>{r['symbol']}</b>  ({ex})",
         f"현재가: ${r['now_price']:g}  (24h {r.get('chg24', 0):+.1f}%)",
         f"목표: ${t1.get('price', 0):g} ({t1.get('pct', 0):+.0f}%), 2차 ${t2.get('price', 0):g} ({t2.get('pct', 0):+.0f}%)",
         f"손절: ${st.get('price', 0):g} ({st.get('pct', 0):+.0f}%, {st.get('basis', '')})",
@@ -159,9 +178,9 @@ def check_coins(st, today):
     b = d["btc"]
     changed = gate_step(st, "coin_gate", b["gate_ok"])
     if changed is True:
-        notify("코인 시장 추세 변화", f"[코인 시장 상승 추세 복귀]\nBTC ${b['close']:,.0f} > 60일선 ${b['ma60']:,.0f} (상승 중)\n이제부터 코인 종목 알림을 보내요")
+        notify("코인 시장 추세 변화", f"<b>코인 시장 상승 추세 복귀</b>\nBTC ${b['close']:,.0f}, 60일선 ${b['ma60']:,.0f} 위 (60일선 상승 중)\n이제부터 코인 종목 알림을 보내요")
     elif changed is False:
-        notify("코인 시장 추세 변화", f"[코인 시장 하락 추세 전환]\nBTC ${b['close']:,.0f}, 60일선 ${b['ma60']:,.0f}\n복귀할 때까지 코인 종목 알림을 멈춰요")
+        notify("코인 시장 추세 변화", f"<b>코인 시장 하락 추세 전환</b>\nBTC ${b['close']:,.0f}, 60일선 ${b['ma60']:,.0f}\n복귀할 때까지 코인 종목 알림을 멈춰요")
     if not st["coin_gate"]["on"]:
         st.pop("coins", None)          # 엄격 모드: 시장이 꺼져 있으면 신호를 추적·알림하지 않음
         return f"gate_off({len(d['passed'])} 후보 무시)"
@@ -189,7 +208,7 @@ def fmt_stock(r, label):
     t = lv["time"]
     strat = " + ".join(r.get("strategies", [])) or "-"
     lines = [
-        f"{r['name']} ({r['code']})" + (" [관심 종목]" if r.get("index") == "관심" else ""),
+        f"<b>{r['name']}</b> ({r['code']})" + (" [관심 종목]" if r.get("index") == "관심" else ""),
         f"전략: {strat}, 점수 {r.get('rank_score', r['domain_score'])}",
         f"현재가: {r['close']:,.0f}원 ({r['chg_pct']:+.1f}%), 거래대금 {r['trade_value_eok']:,.0f}억",
         f"목표: {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%), 2차 {lv['target2']['price']:,} ({lv['target2']['pct']:+.0f}%)",
@@ -254,9 +273,9 @@ def check_stocks(st, today):
     st.pop("stock_gate", None) if not isinstance(st.get("stock_gate"), dict) else None
     changed = gate_step(st, "stock_gate", d["market"]["gate_ok"])
     if changed is True:
-        notify("주식 시장 추세 변화", f"[코스피 상승 추세 복귀]\n코스피 {k.get('close', 0):,.0f} (60일선 위, 60일선 상승)\n이제부터 종목 알림을 보내요")
+        notify("주식 시장 추세 변화", f"<b>코스피 상승 추세 복귀</b>\n코스피 {k.get('close', 0):,.0f} (60일선 위, 60일선 상승)\n이제부터 종목 알림을 보내요")
     elif changed is False:
-        notify("주식 시장 추세 변화", f"[코스피 하락 추세 전환]\n코스피 {k.get('close', 0):,.0f} (60일선 아래 또는 60일선 하락)\n복귀할 때까지 종목 알림을 멈춰요")
+        notify("주식 시장 추세 변화", f"<b>코스피 하락 추세 전환</b>\n코스피 {k.get('close', 0):,.0f} (60일선 아래 또는 60일선 하락)\n복귀할 때까지 종목 알림을 멈춰요")
     if not st["stock_gate"]["on"]:
         st.pop("stocks", None)         # 엄격 모드: 시장이 꺼져 있으면 신호를 추적·알림하지 않음
         return f"gate_off({len(d['passed'])} 후보 무시)"
@@ -305,7 +324,7 @@ def main():
             parts.append(f"{name}=ERR {str(e)[:120]}")
     try:
         sh = stock_hours(now) or (now.weekday() < 5 and 1540 < now.hour * 100 + now.minute <= 1600)
-        parts.append("sell=" + HD.check_positions(st, notify, sh))
+        parts.append("sell=" + HD.check_positions(st, notify_owner, sh))
     except Exception as e:  # noqa: BLE001
         parts.append(f"sell=ERR {str(e)[:120]}")
     for key in ("tracked_stocks", "tracked_coins"):   # 30일 지난 신호 종목은 추적 종료
@@ -328,63 +347,127 @@ def commands_only():
         log(f"commands {n}")
 
 
+def _pct(x):
+    return f"{x:+.1f}%"
+
+
+def holdings_lines(include_stocks):
+    """보유 종목 매도 판정 한 줄씩."""
+    h = HD.load()
+    out = []
+    items = ([(x["name"], x) for x in h.get("stocks", [])] if include_stocks else []) + \
+        [(x["symbol"], x) for x in h.get("coins", [])]
+    for label, x in items:
+        try:
+            rows = HD.S.yahoo(x["yahoo"]) if "yahoo" in x else HD.X.binance_rows(x["symbol"])
+            r = HD.X.check(rows, x.get("buy_price"))
+            out.append(f"{label}  {r['close']:,.6g}  ({_pct(r['pnl_pct'] or 0)})  {r['verdict']}")
+        except Exception:  # noqa: BLE001
+            out.append(f"{label}  확인 실패")
+    return out
+
+
 def report(kind):
     """하루 1번 요약 (무음 알림). kind: stock | coin"""
     now = datetime.now(KST)
-    head = f"{now:%Y-%m-%d} "
     try:
         commands_only()
     except Exception:  # noqa: BLE001
         pass
     h = HD.load()
+    if kind == "morning":
+        m = json.loads(subprocess.run([sys.executable, "-I", STOCK_SCAN, "--market"], capture_output=True,
+                                      text=True, timeout=300, cwd="/tmp").stdout)
+        c = run_json(COIN_SCAN)
+        b = c["btc"]
+        dt = m["detail"]
+        g = lambda key: dt.get(key) or {}  # noqa: E731
+        L = [f"{now:%Y-%m-%d} 장 시작 전", "",
+             "<b>밤사이 미국</b>",
+             f"나스닥  {_pct(g('nasdaq').get('chg_1d', 0))}",
+             f"S&P500  {_pct(g('sp500').get('chg_1d', 0))}",
+             f"환율  {g('usdkrw').get('close', 0):,.0f}원  (5일 {_pct(g('usdkrw').get('chg_5d', 0))})",
+             f"유가  ${g('wti').get('close', 0):,.1f}  (5일 {_pct(g('wti').get('chg_5d', 0))})",
+             "",
+             "<b>오늘 시장 판정</b>",
+             "주식  " + ("상승 추세, 매수 신호 켜짐" if m["gate_ok"] else "하락 추세, 매수 대기")
+             + f"  (코스피 {g('kospi').get('close', 0):,.0f})",
+             "코인  " + ("상승 추세, 매수 신호 켜짐" if b["gate_ok"] else "하락 추세, 매수 대기")
+             + f"  (BTC ${b['close']:,.0f})"]
+        if m["notes"]:
+            L += ["", "<b>주의</b>"] + m["notes"]
+        if b["gate_ok"] and c["passed"]:
+            L += ["", "<b>코인 신호</b>"] + [f"{r['symbol']}  ${r['now_price']:g}" for r in c["passed"][:3]]
+        notify("아침 브리핑", "\n".join(L), 3, "subs")
+        hl = holdings_lines(True)
+        notify("아침 브리핑", "\n".join(L + (["", "<b>보유 종목</b>"] + hl if hl else [])), 3, "owner")
+        return
     if kind == "stock":
         d = run_json(STOCK_SCAN)
-        k = d["market"]["detail"].get("kospi") or {}
-        lines = [f"기준: {d.get('data_date')} 종가" + ("" if d.get("market_open_today") else " (오늘 장 데이터 없음)"),
-                 f"시장: 코스피 {k.get('close', 0):,.0f} ({k.get('chg_1d', 0):+.2f}%), "
-                 + ("상승 추세 (매수 신호 ON)" if d["market"]["gate_ok"] else "하락 추세 (매수 대기)")]
-        if d["market"]["notes"]:
-            lines.append("메모: " + ", ".join(d["market"]["notes"]))
-        lines.append("")
-        if d["market"]["gate_ok"]:
-            for r in d["passed"][:3]:
+        m = d["market"]
+        k = m["detail"].get("kospi") or {}
+        q = m["detail"].get("kosdaq") or {}
+        ns = m["detail"].get("nasdaq") or {}
+        fx = m["detail"].get("usdkrw") or {}
+        gate = m["gate_ok"]
+        L = [f"{d.get('data_date')} 종가 기준", "",
+             "<b>시장</b>",
+             f"코스피  {k.get('close', 0):,.0f}  ({_pct(k.get('chg_1d', 0))})",
+             f"코스닥  {q.get('close', 0):,.0f}  ({_pct(q.get('chg_1d', 0))})",
+             f"나스닥 전일  {_pct(ns.get('chg_1d', 0))}",
+             f"환율  {fx.get('close', 0):,.0f}원  (5일 {_pct(fx.get('chg_5d', 0))})",
+             "",
+             "<b>판정</b>",
+             "상승 추세, 매수 신호 켜짐" if gate else "하락 추세, 매수 대기",
+             "(코스피 60일선 " + ("위, 상승 중" if gate else "아래 또는 하락 중") + ")",
+             ""]
+        L.append("<b>신호</b>")
+        if gate and d["passed"]:
+            for n, r in enumerate(d["passed"][:3], 1):
                 lv = r["levels"]
-                lines += [f"{r['name']} {r['close']:,.0f}원 ({r['chg_pct']:+.1f}%)"
-                          + (" [강한 자리]" if r.get("strong_hits") else ""),
-                          f"목표: {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%), "
-                          f"손절: {lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%)",
-                          f"기간: 10일 내 목표 {lv['time']['target1']['hit_10d']}%, 손절 {lv['time']['stop']['hit_10d']}%",
-                          ""]
-            if not d["passed"]:
-                lines.append("조건 통과 종목 없음")
+                L += [f"{n}. {r['name']}  {r['close']:,.0f}원  ({_pct(r['chg_pct'])})"
+                      + ("  [강한 자리]" if r.get("strong_hits") else ""),
+                      f"   목표 {lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%)",
+                      f"   손절 {lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%)",
+                      f"   10일 내 목표 {lv['time']['target1']['hit_10d']}%, 손절 {lv['time']['stop']['hit_10d']}%"]
+        elif gate:
+            L.append("조건 통과 종목 없음")
         else:
-            lines.append(f"조건만 본 관찰 종목 {len(d['passed'])}개 (매수 신호 아님)")
-        names = [x["name"] for x in h.get("stocks", [])]
-        if names:
-            lines.append("보유: " + ", ".join(names))
-        lines.append("※ 1년 반 백테스트(코스피 +80%) 현재 방식 +125%, 최대 낙폭 -14%")
-        notify("오늘의 주식 점검", head + "\n".join(lines), 3)
+            L.append(f"없음 (조건만 본 관찰 종목 {len(d['passed'])}개)")
+        if m["notes"]:
+            L += ["", "<b>주의</b>"] + m["notes"]
+        tail = ["", "참고: 1년 반 백테스트 +125% (코스피 +80%), 최대 낙폭 -14%"]
+        notify("마감 브리핑", "\n".join(L + tail), 3, "subs")
+        hl = holdings_lines(True)
+        notify("마감 브리핑", "\n".join(L + (["", "<b>보유 종목</b>"] + hl if hl else []) + tail), 3, "owner")
     else:
         d = run_json(COIN_SCAN)
         b = d["btc"]
-        lines = [f"BTC ${b['close']:,.0f} (7일 {b['ret7']:+.1f}%, 30일 {b['ret30']:+.1f}%)",
-                 f"60일선 ${b['ma60']:,.0f} ({(b['close'] / b['ma60'] - 1) * 100:+.1f}%), "
-                 + ("상승 추세 (매수 신호 ON)" if b["gate_ok"] else "하락 추세 (매수 대기)"),
-                 f"단기 박스: 58.9k ~ 61.3k", ""]
-        if b["gate_ok"]:
-            for r in d["passed"][:3]:
+        gate = b["gate_ok"]
+        L = [f"{now:%Y-%m-%d %H:%M} 기준", "",
+             "<b>비트코인</b>",
+             f"전일 종가  ${b['close']:,.0f}",
+             f"7일  {_pct(b['ret7'])}",
+             f"30일  {_pct(b['ret30'])}",
+             f"60일선  ${b['ma60']:,.0f}  (종가 대비 {_pct((b['ma60'] / b['close'] - 1) * 100)})",
+             "",
+             "<b>판정</b>",
+             "상승 추세, 매수 신호 켜짐" if gate else "하락 추세, 매수 대기",
+             "단기 박스  $58,900 ~ $61,300",
+             "", "<b>신호</b>"]
+        if gate and d["passed"]:
+            for n, r in enumerate(d["passed"][:3], 1):
                 lv = r.get("levels", {})
-                lines += [f"{r['symbol']} ${r['now_price']:g}",
-                          f"목표: ${lv.get('target1_30d_high', {}).get('price', 0):g}, "
-                          f"손절: ${lv.get('stop', {}).get('price', 0):g}", ""]
-            if not d["passed"]:
-                lines.append("조건 통과 코인 없음")
+                L += [f"{n}. {r['symbol']}  ${r['now_price']:g}",
+                      f"   목표 ${lv.get('target1_30d_high', {}).get('price', 0):g}",
+                      f"   손절 ${lv.get('stop', {}).get('price', 0):g}"]
+        elif gate:
+            L.append("조건 통과 코인 없음")
         else:
-            lines.append(f"조건만 본 관찰 코인 {len(d['passed'])}개 (매수 신호 아님)")
-        coins = [x["symbol"] for x in h.get("coins", [])]
-        if coins:
-            lines.append("보유: " + ", ".join(coins))
-        notify("오늘의 코인 점검", head + "\n".join(lines), 3)
+            L.append(f"없음 (조건만 본 관찰 코인 {len(d['passed'])}개)")
+        notify("주말 코인 브리핑", "\n".join(L), 3, "subs")
+        hl = holdings_lines(False)
+        notify("주말 코인 브리핑", "\n".join(L + (["", "<b>보유 코인</b>"] + hl if hl else [])), 3, "owner")
 
 
 if __name__ == "__main__":

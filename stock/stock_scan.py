@@ -521,4 +521,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 2 and sys.argv[1] == "--market":
+        json.dump(market(), sys.stdout, ensure_ascii=False)
+    else:
+        main()
