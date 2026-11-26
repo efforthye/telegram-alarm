@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -346,11 +347,18 @@ def poll_commands(st, notify, timeout=0):
         text = normalize(m.get("text") or "")
         ctype = m.get("chat", {}).get("type")
         pcmd = from_prompt(m) if text else None
+        waiting = st.setdefault("awaiting", {})
+        w = waiting.get(cid)
+        if not pcmd and w and text and not text.startswith("/") and time.time() - w["t"] < 180 \
+                and text.split()[0] not in ALIASES.values():
+            pcmd = w["cmd"]                        # 방금 입력을 물어본 채팅의 다음 메시지
         if pcmd:                                   # 입력창에 쓴 답 -> 명령으로
+            waiting.pop(cid, None)
             text = f"{pcmd} {text}"
         elif text in PROMPTS and cid:              # 인자 없이 누른 메뉴 -> 입력창 열기
             try:
                 ask_input(token, cid, text)
+                waiting[cid] = {"cmd": text, "t": time.time()}
             except Exception:  # noqa: BLE001
                 pass
             continue
