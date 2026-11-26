@@ -276,8 +276,8 @@ def handle_subs(text, notify):
 def fmt_sell(label, res, buy_price, item_code=None):
     ln = res["lines"]
     code = (item_code or "")
-    out = [f"<b>{label}</b> 현재가: {res['close']:,.6g}"
-           + (f'  <a href="https://alphasquare.co.kr/home/stock-summary?code={code}">알파스퀘어</a>' if code else "")
+    name = (f'<a href="https://alphasquare.co.kr/home/stock-summary?code={code}">{label}</a>' if code else label)
+    out = [f"<b>{name}</b> 현재가: {res['close']:,.6g}"
            + (f" (매수가 {buy_price:,.6g} 대비 {res['pnl_pct']:+.1f}%)" if buy_price else ""),
            f"판정: {res['verdict']}",
            "이유: " + ", ".join(res["reasons"]),
