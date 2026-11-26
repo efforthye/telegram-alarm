@@ -434,7 +434,7 @@ def report(kind):
                 L.append(f"외 {len(d['passed']) - 5}종목: " + ", ".join(r["name"] for r in d["passed"][5:]))
         else:
             L.append("조건 통과 종목 없음")
-        tail = ["", "참고: 1년 반 백테스트 +125% (코스피 +80%), 최대 낙폭 -14%"]
+        tail = []
         notify("마감 브리핑", "\n".join(L + tail), 3, "subs")
         try:
             json.dump({"date": d.get("data_date"), "gate": gate, "top": [
