@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -32,6 +33,7 @@ HELP = ("입력창에 / 를 치면 명령 메뉴가 나와요. 그룹에서는 /
         "/search 현대차  (또는 /검색 현대차, 검색 현대차)\n"
         "/search 005380\n"
         "/search SOL\n"
+        "/search 팔란티어  (미국 주식: 한글 이름이나 티커 PLTR)\n"
         "\n"
         "<b>보유 종목</b> (매도 신호 감시)\n"
         "/hold 한미사이언스 55200\n"
@@ -304,6 +306,121 @@ def search_coin(sym):
     return "\n".join(L)
 
 
+US_KO = {
+    "팔란티어": "PLTR", "앤트로픽": "ANT", "엔비디아": "NVDA", "테슬라": "TSLA", "애플": "AAPL",
+    "마이크로소프트": "MSFT", "마소": "MSFT", "구글": "GOOGL", "알파벳": "GOOGL", "아마존": "AMZN",
+    "메타": "META", "넷플릭스": "NFLX", "브로드컴": "AVGO", "에이엠디": "AMD", "AMD": "AMD",
+    "인텔": "INTC", "퀄컴": "QCOM", "마이크론": "MU", "TSMC": "TSM", "티에스엠씨": "TSM",
+    "코인베이스": "COIN", "마이크로스트래티지": "MSTR", "스트래티지": "MSTR", "로빈후드": "HOOD",
+    "써클": "CRCL", "서클": "CRCL", "스페이스엑스": "SPCX", "스페이스X": "SPCX", "오라클": "ORCL",
+    "세일즈포스": "CRM", "에스에이피": "SAP", "어도비": "ADBE", "우버": "UBER", "에어비앤비": "ABNB",
+    "쇼피파이": "SHOP", "버크셔": "BRK-B", "제이피모건": "JPM", "일라이릴리": "LLY", "노보노디스크": "NVO",
+    "유나이티드헬스": "UNH", "월마트": "WMT", "코스트코": "COST", "디즈니": "DIS", "나이키": "NKE",
+    "보잉": "BA", "아이온큐": "IONQ", "리게티": "RGTI", "소파이": "SOFI", "스노우플레이크": "SNOW",
+    "크라우드스트라이크": "CRWD", "ARM": "ARM", "암홀딩스": "ARM", "슈퍼마이크로": "SMCI",
+    "QQQ": "QQQ", "SPY": "SPY",
+}
+US_EXCH = {"NMS", "NYQ", "NGM", "NCM", "ASE", "PCX", "BTS", "NAS", "NYS"}
+
+
+def find_us(q):
+    """한글 이름 매핑 또는 야후 검색으로 미국 상장 종목 티커."""
+    t = q.strip()
+    if t in US_KO:
+        return US_KO[t]
+    if not t.isascii():
+        return None
+    # 1) 티커 그대로 시세 조회 (미국 거래소면 바로 채택)
+    if re.fullmatch(r"[A-Za-z.\-]{1,6}", t):
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{t.upper()}?range=5d&interval=1d"
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
+                                        timeout=15) as r:
+                meta = json.load(r)["chart"]["result"][0]["meta"]
+            if meta.get("exchangeName") in US_EXCH or meta.get("fullExchangeName", "").upper().startswith(("NASDAQ", "NYSE")):
+                return t.upper()
+        except Exception:  # noqa: BLE001
+            pass
+    # 2) 이름으로 야후 검색 (실패하면 한 번 더)
+    qs = []
+    for _ in range(2):
+        try:
+            url = ("https://query1.finance.yahoo.com/v1/finance/search?quotesCount=6&newsCount=0&q="
+                   + urllib.parse.quote(t))
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
+                                        timeout=15) as r:
+                qs = json.load(r).get("quotes", [])
+            break
+        except Exception:  # noqa: BLE001
+            time.sleep(1)
+    for x in qs:
+        if x.get("symbol", "").upper() == t.upper() and x.get("exchange") in US_EXCH:
+            return x["symbol"]
+    for x in qs:
+        if x.get("quoteType") in ("EQUITY", "ETF") and x.get("exchange") in US_EXCH:
+            return x["symbol"]
+    return None
+
+
+def search_us(ticker):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5d&interval=1d"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
+                                    timeout=15) as r:
+            meta = json.load(r)["chart"]["result"][0]["meta"]
+    except Exception:  # noqa: BLE001
+        meta = {}
+    name = meta.get("longName") or meta.get("shortName") or ticker
+    link = f'<a href="https://finance.yahoo.com/quote/{ticker}">{name}</a>'
+    rows = S.yahoo(ticker)
+    if not rows:
+        return f"<b>{link}</b> ({ticker})\n시세를 가져오지 못했어요."
+    spx = [r[4] for r in S.yahoo("^GSPC", "1y")]
+    gate = spx[-1] > sum(spx[-60:]) / 60 > sum(spx[-65:-5]) / 60
+    c = [r[4] for r in rows]
+    L = [f"<b>{link}</b> ({ticker})",
+         f"{rows[-1][0]} 종가 ${c[-1]:,.2f}" + (f" ({_p((c[-1] / c[-2] - 1) * 100)})" if len(c) > 1 else ""),
+         "", "<b>판정</b>"]
+    a = S.analyze(rows) if len(rows) >= 130 else None
+    if not a:
+        hi, lo = max(r[2] for r in rows), min(r[3] for r in rows)
+        L += [f"상장 {len(rows)}거래일째라 차트 판정을 못 해요 (메모: 신규상장주는 관망).",
+              f"상장 후 고가 ${hi:,.2f} ({_p((c[-1] / hi - 1) * 100)}), 저가 ${lo:,.2f} ({_p((c[-1] / lo - 1) * 100)})",
+              f"상장일 종가 ${c[0]:,.2f} 대비 {_p((c[-1] / c[0] - 1) * 100)}",
+              "시장(S&P500): " + ("상승 추세" if gate else "하락 추세 (60일선 아래 또는 하락 중)")]
+        return "\n".join(L)
+    ex = X.check(rows)
+    lv = a["levels"]
+    core = (not a["stagnant"]) and (a["domain_score"] >= 3 or a["macd_zero_cross"])
+    ok = ((a["buy_ok"] == 6 and core) or (a["bb_ok"] == 3 and not a["stagnant"])) and not a["blockers"]
+    verdict = ("침체 구간, 매수 대상 아님" if a["stagnant"] else
+               "매수 조건 통과" if ok and gate else
+               "종목 조건 통과, 시장 하락 추세라 대기" if ok else
+               "근접 (조건 일부 미충족)" if a["buy_ok"] >= 5 or a["bb_ok"] >= 2 else "매수 조건 미충족")
+    miss = [k for k, v in a["buy_checks"].items() if not v]
+    t = lv.get("time", {})
+    L += [verdict,
+          "시장(S&P500): " + ("상승 추세" if gate else "하락 추세 (60일선 아래 또는 하락 중)"),
+          "", "<b>조건</b>",
+          f"6조건 {a['buy_ok']}/6" + (f" (빠짐: {', '.join(miss)})" if miss else ""),
+          f"볼린저/OBV {a['bb_ok']}/3",
+          f"도메인 점수 {a['domain_score']}" + (f" ({', '.join(a['domain_hits'])})" if a["domain_hits"] else ""),
+          f"RSI {a['indicators']['rsi9']}, 거래량 {a['indicators']['vol_ratio_20']}배"]
+    if a.get("strong_hits"):
+        L.append("강한 자리: " + ", ".join(a["strong_hits"]))
+    if a["warnings"]:
+        L += ["", "<b>주의</b>"] + a["warnings"]
+    L += ["", "<b>가격</b>",
+          f"목표 ${lv['target1']['price']:,} ({lv['target1']['pct']:+.0f}%)",
+          f"손절 ${lv['stop']['price']:,} ({lv['stop']['pct']:+.0f}%, {lv['stop']['basis']})",
+          f"10일선 ${lv['exit_line_ma10']['price']:,} ({lv['exit_line_ma10']['pct']:+.0f}%)",
+          f"60일선 ${ex['lines']['ma60']:,.2f} ({'하락' if ex['lines']['ma60_falling'] else '상승'} 중)"]
+    if t:
+        L.append(f"10일 내 목표 {t['target1']['hit_10d']}%, 손절 {t['stop']['hit_10d']}%")
+    L += ["", "<b>보유 중이라면</b>", f"{ex['verdict']}: " + ", ".join(ex["reasons"][:3])]
+    return "\n".join(L)
+
+
 # ------------------------------------------------------------------ 명령 처리
 def handle(text, notify):
     t = text.strip()
@@ -318,7 +435,16 @@ def handle(text, notify):
         if csym and (q.upper() == csym or not q.isascii()):
             notify(f"코인 검색: {csym}", search_coin(csym))
             return
+        if q.strip() in US_KO:
+            us = US_KO[q.strip()]
+            notify(f"미국 주식: {us}", search_us(us))
+            return
         cands, total = stock_candidates(q)
+        if not cands and q.isascii():
+            us = find_us(q)
+            if us:
+                notify(f"미국 주식: {us}", search_us(us))
+                return
         if len(cands) == 1:
             notify(f"종목 검색: {cands[0]['name']}", search_stock(cands[0]))
             return
